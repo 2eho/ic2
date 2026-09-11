@@ -418,3 +418,85 @@ func EncodeJPEG(w io.Writer, img image.Image, quality int) error {
 	}
 	return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
 }
+
+// UpdateMeta 更新资产的显示元数据（标题、标签、来源、备注）。
+//
+// 为什么要这个能力：资产一旦生成就带着一个自动名（如 "result-1"），
+// 用户需要把它改成有意义的名字才能用起来——没有改名能力的素材库等于一个只读列表。
+//
+// 有意不允许修改的字段：hash / size / mime / kind。
+// 它们是**内容寻址的事实**，改了会让「同一 hash 只存一份」这条不变量失效
+// （DB 说这条记录是 PNG，Blob 里其实是 JPEG，缩略图与下载都会错乱）。
+func (s *Service) UpdateMeta(ctx context.Context, wsID, id string, patch AssetMetaPatch) (*api.AssetDTO, error) {
+	if wsID == "" {
+		return nil, platform.ErrInvalid("workspaceId is required")
+	}
+	if !validID(id) {
+		return nil, platform.ErrNotFound("asset")
+	}
+	// 先校验归属：跨工作区改名必须 404（不泄露存在性，INV-10）
+	current, err := s.Get(ctx, wsID, id)
+	if err != nil {
+		return nil, err
+	}
+	name := current.Name
+	if patch.Name != nil {
+		name = sanitizeName(*patch.Name)
+		if len(name) > MaxNameLen {
+			name = name[:MaxNameLen]
+		}
+	}
+	meta := current.Meta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	for k, v := range patch.Meta {
+		meta[k] = v
+	}
+	// 只允许覆盖已知键，其余透传：meta 是留给上层的扩展位，
+	// 但删除用显式 null（避免「传空对象就清空」这种隐式语义）。
+	for _, k := range patch.MetaDelete {
+		delete(meta, k)
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return nil, platform.AsError(err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE assets SET name = ?, meta = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		name, string(raw), id, wsID)
+	if err != nil {
+		return nil, platform.AsError(err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, platform.ErrNotFound("asset")
+	}
+	return s.Get(ctx, wsID, id)
+}
+
+// AssetMetaPatch 是资产元数据补丁。用指针表示「是否提供该字段」，
+// 从而区分「不修改」与「改成空串」。
+type AssetMetaPatch struct {
+	Name       *string
+	Meta       map[string]any
+	MetaDelete []string
+}
+
+// MaxNameLen 资产显示名上限（与前端 sanitizeFileName 的截断长度一致）。
+const MaxNameLen = 120
+
+// validID 校验资产 id 形状（与 internal/graph 的 ID 规则一致）。
+// 刻意不依赖 graph 包：asset 不该为了一个字符串校验而依赖图领域。
+func validID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}

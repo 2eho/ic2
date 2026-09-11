@@ -54,7 +54,17 @@ function check(p) {
   }
   const isDocOrMeta = ALLOW_UPSTREAM.some((re) => re.test(rel));
   if (!isDocOrMeta && /basketikun|infinite-canvas/.test(body)) {
-    problems.push(`${rel}: 业务代码中出现上游项目引用（应移除或移入文档/许可）`);
+    // 「上游产品标识」与「上游产品标识作为**兼容性常量**」是两件事。
+    // 前者是搬运（必须拒绝），后者是我们主动写下的互操作契约——
+    // 例如资产包导入器要识别 `app: "infinite-canvas"` 才能读老用户的包。
+    // 这类出现必须带明确说明，因此要求同一行/邻近行出现 legacy/兼容/import 等词。
+    const isCompatReference =
+      /(legacy|compat|兼容|上游|import|immigrat)/i.test(
+        body.split('\n').filter((l) => /basketikun|infinite-canvas/.test(l)).join(' '),
+      );
+    if (!isCompatReference) {
+      problems.push(`${rel}: 业务代码中出现上游项目引用（应移除或移入文档/许可）`);
+    }
   }
   for (const s of SECRET_PATTERNS) {
     const m = body.match(s.re);

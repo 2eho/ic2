@@ -98,6 +98,46 @@ func (h *handlers) getAssetThumb(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// updateAsset 更新资产的显示元数据（标题/标签/备注）。
+//
+// 不允许改 hash/size/mime/kind：它们是内容寻址的事实，改了会破坏
+// 「同一 hash 只存一份」这条不变量，导致缩略图与下载内容错乱。
+func (h *handlers) updateAsset(w http.ResponseWriter, r *http.Request) {
+	updater, ok := h.deps.Assets.(AssetMetaUpdater)
+	if !ok {
+		writeError(w, r, platform.NewError(501, platform.CodeNotImplemented, "asset meta update not supported"))
+		return
+	}
+	p, err := h.requireWorkspace(r, r.URL.Query().Get("workspaceId"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.requireAction(r, p, ActWriteContent); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var in struct {
+		Name       *string        `json:"name,omitempty"`
+		Meta       map[string]any `json:"meta,omitempty"`
+		MetaDelete []string       `json:"metaDelete,omitempty"`
+	}
+	if err := decodeBody(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	// 显式区分「不修改」与「改成空」：name 为 null/缺省时不改，
+	// 传空串才是「清空标题」（会被 sanitize 成占位名）。
+	dto, err := updater.UpdateMeta(r.Context(), p.WorkspaceID, r.PathValue("aid"), AssetMetaPatch{
+		Name: in.Name, Meta: in.Meta, MetaDelete: in.MetaDelete,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
 func (h *handlers) deleteAsset(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Assets == nil {
 		writeError(w, r, platform.NewError(501, platform.CodeNotImplemented, "assets not configured"))

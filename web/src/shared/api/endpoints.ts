@@ -108,6 +108,22 @@ export const api = {
     request<Asset>(
       `/api/v1/assets/${aid}?workspaceId=${encodeURIComponent(wid)}`,
     ),
+  updateAsset: (
+    aid: string,
+    wid: string,
+    patch: {
+      name?: string;
+      meta?: Record<string, unknown>;
+      metaDelete?: string[];
+    },
+  ) =>
+    request<Asset>(
+      `/api/v1/assets/${aid}?workspaceId=${encodeURIComponent(wid)}`,
+      {
+        method: "PATCH",
+        body: patch,
+      },
+    ),
   deleteAsset: (aid: string, wid: string) =>
     request<{ ok: boolean }>(
       `/api/v1/assets/${aid}?workspaceId=${encodeURIComponent(wid)}`,

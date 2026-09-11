@@ -100,6 +100,13 @@ paths:
     get:
       operationId: getAsset
       summary: 资产元信息
+    patch:
+      operationId: updateAsset
+      summary: 更新资产显示元数据（标题/标签/备注）
+      description: |
+        只允许改显示元数据。hash/size/mime/kind 是**内容寻址的事实**，
+        改了会破坏「同一 hash 只存一份」这条不变量（DB 说是 PNG、Blob 里是 JPEG），
+        因此这些字段不在补丁范围内。跨工作区更新返回 404 而不是 403（不泄露存在性）。
     delete:
       operationId: deleteAsset
       summary: 删除资产（引用计数归零后由 GC 回收）

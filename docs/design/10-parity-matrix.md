@@ -196,10 +196,10 @@
 | # | 功能 | 原实现 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
 | 7.1 | 三种类型 text/image/video，列表卡片 + 分页 + 类型筛选 + 关键词搜索 | `pages/assets/index.tsx` | 可用 | done |
-| 7.2 | 新建/编辑（标题、封面、标签、来源、备注、正文/图片） | 同上 | 可用 | todo |
+| 7.2 | 新建/编辑（标题、封面、标签、来源、备注、正文/图片） | 同上 | `asset.Service.UpdateMeta` + `features/assets/AssetEditor` | 可改显示元数据；内容字段只读（改了会破坏内容寻址不变量） | done |
 | 7.3 | 删除、复制文本、下载（读本地 blob 而非预览地址） | 同上 + CHANGELOG v0.18.0 修复 | 中文/空格/书名号标题可下载 | done |
-| 7.4 | 打包导出 zip / 导入 zip（含媒体文件） | `asset-transfer.ts` | 导入后资产可预览 | todo |
-| 7.5 | 与画布互操作（画布存资产、资产插入画布） | 双向 | 可用 | todo |
+| 7.4 | 打包导出 zip / 导入 zip（含媒体文件） | `asset-transfer.ts` | `shared/zip`（自研 store 模式）+ `features/assets/transfer` | 往返一致（同内容两次导出字节相同）；zip slip / zip bomb 有防护；缺文件与跳过条目显式上报 | done |
+| 7.5 | 与画布互操作（画布存资产、资产插入画布） | 双向 | 画布侧「存为素材」+ 素材侧「复制 ID」 | 双向可用；画布只存 assetId，不再把 dataURL 塞进节点 | done |
 | 7.6 | 引用计数与 GC | 前端 `cleanupImages` 遍历 IndexedDB | 服务端 `asset_refs` + 延迟回收 | done |
 
 ## 8. 配置与同步

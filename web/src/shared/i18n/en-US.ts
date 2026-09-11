@@ -187,6 +187,17 @@ export const enUS: Dict = {
     importZip: "Import zip",
     insertToCanvas: "Insert into canvas",
     referenced: "Referenced {n} times",
+    uploaded: "Uploaded {n} assets",
+    exported: "Asset package exported",
+    exportSkipped:
+      "Exported, but {n} assets were skipped (size or read failure)",
+    imported: "Imported {n} assets",
+    importMissing: "{n} files are missing in the package",
+    importSkipped: "{n} entries skipped",
+    copyId: "Copy ID",
+    copiedId: "Asset ID copied — paste it on the canvas to insert",
+    contentReadonly:
+      "These are content facts and cannot be edited; re-upload to replace content",
   },
   prompts: {
     title: "Prompt library",

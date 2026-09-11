@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/context-flow/ic/internal/platform"
 	"github.com/context-flow/ic/migrations"
@@ -330,5 +331,92 @@ func TestDownscaleKeepsAspect(t *testing.T) {
 	small := image.NewRGBA(image.Rect(0, 0, 10, 10))
 	if Downscale(small, 100) != image.Image(small) {
 		t.Fatal("小图不应被放大")
+	}
+}
+
+// 元数据更新：改名 + 加标签，且不得触碰内容寻址字段。
+func TestUpdateAssetMeta(t *testing.T) {
+	svc := newTestService(t)
+	const wsID = "ws_1"
+	ctx := context.Background()
+	dto, err := svc.Upload(ctx, wsID, "raw.png", "image/png", strings.NewReader("hello"), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "《我的图》 第二版.png"
+	updated, err := svc.UpdateMeta(ctx, wsID, dto.ID, AssetMetaPatch{
+		Name: &name,
+		Meta: map[string]any{"tags": "风景,夜景", "note": "备注"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != name {
+		t.Fatalf("中文名被改写: %q", updated.Name)
+	}
+	if updated.Meta["tags"] != "风景,夜景" {
+		t.Fatalf("meta 未写入: %+v", updated.Meta)
+	}
+	// 内容寻址字段必须不变
+	if updated.Hash != dto.Hash || updated.Size != dto.Size || updated.MIME != dto.MIME {
+		t.Fatalf("内容字段被修改: %+v vs %+v", updated, dto)
+	}
+}
+
+// 元数据删除用显式列表（避免「传空对象就清空」的隐式语义）。
+func TestUpdateAssetMetaDeleteKey(t *testing.T) {
+	svc := newTestService(t)
+	const wsID = "ws_1"
+	ctx := context.Background()
+	dto, _ := svc.Upload(ctx, wsID, "a.png", "image/png", strings.NewReader("x"), 1)
+	if _, err := svc.UpdateMeta(ctx, wsID, dto.ID, AssetMetaPatch{Meta: map[string]any{"a": 1, "b": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.UpdateMeta(ctx, wsID, dto.ID, AssetMetaPatch{MetaDelete: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := updated.Meta["a"]; ok {
+		t.Fatal("a 应被删除")
+	}
+	if updated.Meta["b"] != float64(2) && updated.Meta["b"] != 2 {
+		t.Fatalf("b 不应受影响: %+v", updated.Meta)
+	}
+}
+
+// 跨工作区更新必须 404（不泄露存在性）。
+func TestUpdateAssetMetaCrossWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	const wsID = "ws_1"
+	ctx := context.Background()
+	dto, _ := svc.Upload(ctx, wsID, "a.png", "image/png", strings.NewReader("x"), 1)
+	name := "hacked"
+	_, err := svc.UpdateMeta(ctx, "ws_other", dto.ID, AssetMetaPatch{Name: &name})
+	if err == nil {
+		t.Fatal("跨工作区更新应被拒绝")
+	}
+	if de := platform.AsDomainError(err); de.Code != platform.CodeNotFound {
+		t.Fatalf("期望 not_found（不泄露存在性），实际 %s", de.Code)
+	}
+}
+
+// 超长名字必须被截断（否则会在下游（Content-Disposition 等）出问题）。
+func TestUpdateAssetMetaTruncatesName(t *testing.T) {
+	svc := newTestService(t)
+	const wsID = "ws_1"
+	ctx := context.Background()
+	dto, _ := svc.Upload(ctx, wsID, "a.png", "image/png", strings.NewReader("x"), 1)
+	long := strings.Repeat("字", 500)
+	updated, err := svc.UpdateMeta(ctx, wsID, dto.ID, AssetMetaPatch{Name: &long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Name) > MaxNameLen*3 {
+		// 截断按字节做，中文 3 字节/字，因此用 3 倍上界
+		t.Fatalf("名字未被截断: %d", len(updated.Name))
+	}
+	// 关键：不能切出半个 UTF-8 字符
+	if !utf8.ValidString(updated.Name) {
+		t.Fatal("截断产生了非法 UTF-8")
 	}
 }

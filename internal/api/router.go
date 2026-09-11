@@ -71,6 +71,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/assets/{aid}", h.getAsset)
 	mux.HandleFunc("GET /api/v1/assets/{aid}/raw", h.getAssetRaw)
 	mux.HandleFunc("GET /api/v1/assets/{aid}/thumb", h.getAssetThumb)
+	mux.HandleFunc("PATCH /api/v1/assets/{aid}", h.updateAsset)
 	mux.HandleFunc("DELETE /api/v1/assets/{aid}", h.deleteAsset)
 	mux.HandleFunc("GET /api/v1/workspaces/{wid}/assets", h.listAssets)
 

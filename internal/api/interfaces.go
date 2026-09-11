@@ -37,6 +37,21 @@ type AssetService interface {
 	Thumb(ctx context.Context, wsID, id string, w int) ([]byte, string, error)
 }
 
+// AssetMetaUpdater 是资产元数据更新能力（可选实现）。
+//
+// 单独一个接口而不是塞进 AssetService：这样「只读部署」可以不实现它，
+// 而 handler 用类型断言探测能力——比给 AssetService 加一个永远 err 的方法更诚实。
+type AssetMetaUpdater interface {
+	UpdateMeta(ctx context.Context, wsID, id string, patch AssetMetaPatch) (*AssetDTO, error)
+}
+
+// AssetMetaPatch 是资产元数据补丁（指针字段区分「不修改」与「改为空」）。
+type AssetMetaPatch struct {
+	Name       *string
+	Meta       map[string]any
+	MetaDelete []string
+}
+
 // AssetDTO 是资产对外表示。
 type AssetDTO struct {
 	ID        string            `json:"id"`
