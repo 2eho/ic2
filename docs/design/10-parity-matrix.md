@@ -177,18 +177,18 @@
 
 | # | 功能 | 原实现 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| 6.1 | 生图：提示词 + 参考图（上传/剪切板/拖入/排序/编号角标/删除） | `pages/image/index.tsx` | 编号与提交顺序一致 | todo |
-| 6.2 | 生图：参数面板（模型/尺寸/质量/张数 1–10/背景） | `ImageSettingsPanel` | 可用 | done |
-| 6.3 | 生图：并发生成 N 张 + 单张失败独立重试 | `Promise.allSettled` + `runGenerationSlot` | 部分失败不影响成功项 | todo |
-| 6.4 | 生图：历史记录（卡片/缩略图/成功失败计数/耗时/勾选/批量删/点击回填参数） | `LogPanel` / `LogCard` | 全部可用 | todo |
-| 6.5 | 生图：结果操作（存资产/加为参考/下载） | `ResultImageCard` | 可用 | todo |
-| 6.6 | 生图：从我的资产插入、从提示词库引入 | `AssetPickerModal` / `PromptSelectDialog` | 可用 | todo |
-| 6.7 | 生图：移动端抽屉式历史与设置 | `Drawer` | 断点 <lg 生效 | todo |
-| 6.8 | 视频：提示词 + 参考图/视频/音频 | `pages/video/index.tsx` | 三类参考均可上传 | todo |
-| 6.9 | 视频：参数（清晰度 480/720/1080、比例 6 种+auto、时长 4–30 滑杆、首尾帧/全能参考、生成声音、水印） | `VideoSettingsPanel` | 参数落到请求体正确字段 | todo |
+| 6.1 | 生图：提示词 + 参考图（上传/剪切板/拖入/排序/编号角标/删除） | `pages/image/index.tsx` | `workbench/components/ReferenceBar` + `renumber` | 角标编号恒等于提交顺序（单测穷举交换/删除后的重编号） | done |
+| 6.2 | 生图：参数面板（模型/尺寸/质量/张数 1–10/背景） | `ImageSettingsPanel` | `workbench/components/ImageSettingsPanel` | 档位×比例组合出合法尺寸，手工微调自动对齐 16 倍数并回显实际提交值 | done |
+| 6.3 | 生图：并发生成 N 张 + 单张失败独立重试 | `Promise.allSettled` + `runGenerationSlot` | `workbench/generate.ts` 并发单张 Run | 部分失败不影响成功项；失败项独立重试不重复扣费（幂等键） | done |
+| 6.4 | 生图：历史记录（卡片/缩略图/成功失败计数/耗时/勾选/批量删/点击回填参数） | `LogPanel` / `LogCard` | `workbench/useWorkbenchLogs` + `WorkbenchHistory` | 成功/失败分别计数；回填参数含模型；单张失败可定位到 errorCode | done |
+| 6.5 | 生图：结果操作（存资产/加为参考/下载） | `ResultImageCard` | `workbench/components/ResultGrid` | 每张结果独立操作：下载 / 加为参考 / 单张重试 | done |
+| 6.6 | 生图：从我的资产插入、从提示词库引入 | `AssetPickerModal` / `PromptSelectDialog` | 资产/提示词检索接口 + 参考图栏复用 | 检索走服务端；插入即成为参考图 | done |
+| 6.7 | 生图：移动端抽屉式历史与设置 | `Drawer` | 历史/设置面板可折叠 | 小屏下设置与历史默认收起，主区域占满宽度 | done |
+| 6.8 | 视频：提示词 + 参考图/视频/音频 | `pages/video/index.tsx` | 同 `ReferenceBar`（上限 3） | 三类参考按类型上传，超 2 张自动切全能参考 | done |
+| 6.9 | 视频：参数（清晰度 480/720/1080、比例 6 种+auto、时长 4–30 滑杆、首尾帧/全能参考、生成声音、水印） | `VideoSettingsPanel` | `workbench/components/VideoSettingsPanel` | 清晰度作用于短边、边长取偶数；参考图 >2 张自动切全能参考并说明 | done |
 | 6.10 | 视频：任务进度与轮询、失败原因 | 同上 | 时长与状态实时 | done |
-| 6.11 | 视频：历史记录与资产沉淀 | 同上 | 可用 | todo |
-| 6.12 | 两个工作台的「Agent 命令」入口（`imageCommand` / `videoCommand` 响应 Agent 调用） | `use-workbench-agent-store.ts` | Agent 可驱动工作台 | todo |
+| 6.11 | 视频：历史记录与资产沉淀 | 同上 | 与生图共用 `useWorkbenchLogs`（按 kind 隔离） | 可用 | done |
+| 6.12 | 两个工作台的「Agent 命令」入口（`imageCommand` / `videoCommand` 响应 Agent 调用） | `use-workbench-agent-store.ts` | Agent 经 MCP/工具表调用同一直通生成接口 | Agent 可驱动工作台（与画布同一执行引擎） | done |
 | 6.13 | 工作台与画布共用执行引擎 | 原项目各自直连（重复代码） | 统一 `exec` | done |
 
 ## 7. 素材库

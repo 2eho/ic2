@@ -283,3 +283,59 @@ func TestProviderForSpecCarriesParams(t *testing.T) {
 		t.Fatalf("params 未传递: %+v", s.Params)
 	}
 }
+
+// 直通生成的参考图必须成为 Steps 的 Inputs（否则「图生图」会退化成文生图）。
+//
+// 这条对应一个真实的静默错误：参考图传进来了但没进请求体，
+// 上游按纯文本生成，用户看到「结果和参考图没关系」却查不出原因。
+func TestAdHocReferencesBecomeInputs(t *testing.T) {
+	plan, err := CompileAdHoc(Run{
+		ID: "run_1",
+		Params: map[string]any{
+			"capability": "image.edit",
+			"prompt":     "改成夜景",
+			"references": []any{"as_aaa", "as_bbb"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 1 {
+		t.Fatalf("步骤数不符: %d", len(plan.Steps))
+	}
+	step := plan.Steps[0]
+	if len(step.Inputs) != 2 {
+		t.Fatalf("参考图未成为输入: %+v", step.Inputs)
+	}
+	// Label 必须与前端角标编号一致（"图片1" / "图片2"）
+	if step.Inputs[0].Label != "图片1" || step.Inputs[1].Label != "图片2" {
+		t.Fatalf("引用标签与 UI 编号不一致: %q %q", step.Inputs[0].Label, step.Inputs[1].Label)
+	}
+	if step.Inputs[0].AssetID != "as_aaa" {
+		t.Fatalf("顺序错位: %+v", step.Inputs)
+	}
+}
+
+// 参考图数量超限必须在提交前拒绝（否则上游会报一个看不懂的 400）。
+func TestAdHocRejectsTooManyReferences(t *testing.T) {
+	refs := make([]any, 0, 8)
+	for i := 0; i < 8; i++ {
+		refs = append(refs, "as_"+string(rune('a'+i)))
+	}
+	_, err := CompileAdHoc(Run{ID: "r", Params: map[string]any{
+		"capability": "image.edit", "prompt": "x", "references": refs,
+	}})
+	if err == nil {
+		t.Fatal("超过 7 张参考图应被拒绝")
+	}
+}
+
+// 非法的 assetId 同样在提交前拒绝。
+func TestAdHocRejectsInvalidAssetID(t *testing.T) {
+	_, err := CompileAdHoc(Run{ID: "r", Params: map[string]any{
+		"capability": "image.edit", "prompt": "x", "references": []any{"../../etc/passwd"},
+	}})
+	if err == nil {
+		t.Fatal("非法 assetId 应被拒绝")
+	}
+}

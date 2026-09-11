@@ -131,14 +131,18 @@ func (h *handlers) generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Capability     string         `json:"capability"`
-		ProviderID     string         `json:"providerId,omitempty"`
-		CredentialID   string         `json:"credentialId,omitempty"`
-		Model          string         `json:"model,omitempty"`
-		Prompt         string         `json:"prompt"`
-		Params         map[string]any `json:"params,omitempty"`
-		OutputCount    int            `json:"outputCount,omitempty"`
-		IdempotencyKey string         `json:"idempotencyKey,omitempty"`
+		Capability   string         `json:"capability"`
+		ProviderID   string         `json:"providerId,omitempty"`
+		CredentialID string         `json:"credentialId,omitempty"`
+		Model        string         `json:"model,omitempty"`
+		Prompt       string         `json:"prompt"`
+		Params       map[string]any `json:"params,omitempty"`
+		OutputCount  int            `json:"outputCount,omitempty"`
+		// References 是参考图的 assetId 列表（图生图/视频参考）。
+		// 单独一个字段而不是塞进 params：它是**资源引用**，需要被类型校验与限额，
+		// 混进 params 会变成「随便传什么都能过」的自由字典。
+		References     []string `json:"references,omitempty"`
+		IdempotencyKey string   `json:"idempotencyKey,omitempty"`
 	}
 	// 直通生成的提交前校验（对齐 docs/design/05 §2.1「校验失败在提交前返回 422」）：
 	// 空提示词与超限的张数不应该变成一个「排队后立刻失败」的 Run——
@@ -191,6 +195,7 @@ func (h *handlers) generate(w http.ResponseWriter, r *http.Request) {
 			"prompt":       in.Prompt,
 			"params":       in.Params,
 			"outputCount":  count,
+			"references":   in.References,
 		},
 		IdempotencyKey: in.IdempotencyKey,
 	})

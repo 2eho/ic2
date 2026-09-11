@@ -2,11 +2,38 @@ package exec
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/context-flow/ic/internal/graph"
 	"github.com/context-flow/ic/internal/platform"
 	"github.com/context-flow/ic/internal/provider"
 )
+
+// maxAdHocReferences 与前端 ReferenceBar 的上限保持一致（图片 7 张）。
+//
+// 两边各写一个数字会漂移：前端允许 7 张而后端只收 5 张时，
+// 用户会在第 6 张收到一个参数错误，且看不出为什么。
+const maxAdHocReferences = 7
+
+// stringSlice 把任意 JSON 值宽松地转成字符串数组（只接受字符串元素，忽略其余）。
+// 不报错是刻意的：references 是可选参数，形状不对时按「没有参考图」处理更合理，
+// 而真正的类型错误会在下面用 ValidID 拦住。
+func stringSlice(v any) []string {
+	list, ok := v.([]any)
+	if !ok {
+		if ss, ok := v.([]string); ok {
+			return ss
+		}
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // 直通生成（工作台）：不落画布，但**复用同一个执行引擎**。
 //
@@ -28,6 +55,27 @@ func CompileAdHoc(run Run) (*Plan, error) {
 	prompt, _ := run.Params["prompt"].(string)
 	if prompt == "" {
 		return nil, platform.ErrInvalid("prompt is required")
+	}
+	// 参考图以 assetId 数组传入（工作台的「图生图」路径）。
+	// 这里只做形状与上限校验；真正的取字节在 engine.materializeInputs 里完成
+	// （那里才有 AssetReader，能把资产读成 dataURI 交给适配器）。
+	references := stringSlice(run.Params["references"])
+	if len(references) > maxAdHocReferences {
+		return nil, platform.NewError(422, platform.CodeInvalidRequest,
+			"参考图数量超限").WithDetail("limit", maxAdHocReferences).WithDetail("got", len(references))
+	}
+	inputs := make([]provider.ResolvedInput, 0, len(references))
+	for i, assetID := range references {
+		if !graph.ValidID(assetID) {
+			return nil, platform.NewError(422, platform.CodeInvalidRequest,
+				"参考图 assetId 不合法").WithDetail("index", i)
+		}
+		inputs = append(inputs, provider.ResolvedInput{
+			Kind:    "image",
+			AssetID: assetID,
+			// Label 会进提示词的引用说明，必须与 UI 的角标编号一致
+			Label: fmt.Sprintf("图片%d", i+1),
+		})
 	}
 	count, ok := intFromAny(run.Params["outputCount"])
 	if !ok || count <= 0 {
@@ -54,6 +102,7 @@ func CompileAdHoc(run Run) (*Plan, error) {
 			Params:       params,
 			Count:        count,
 			Prompt:       prompt,
+			Inputs:       inputs,
 			// AdHoc 不回写画布：结果由 Run 的 outputs 承载，前端直接展示。
 			WriteBack: WriteBack{},
 		}},

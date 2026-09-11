@@ -25,10 +25,33 @@ const written = [];
 // 刻意不引第三方依赖：契约文件格式由我们控制，读不了就报错，不静默兜底。
 function parseYAML(text) {
   const lines = [];
-  for (const raw of text.split('\n')) {
+  const rawLines = text.split('\n');
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
     if (!raw.trim() || raw.trim().startsWith('#')) continue;
     const indent = raw.match(/^ */)[0].length;
-    lines.push({ indent, body: raw.trim().replace(/\s+#(?![^"']*["']).*$/, '') });
+    let body = raw.trim().replace(/\s+#(?![^"']*["']).*$/, '');
+    // 块标量（`key: |` 或 `key: >`）：其后的缩进内容全部属于该值。
+    // 不支持块标量会让「多行 description」被当成新键，
+    // 进而把 paths 下的结构解析乱（实测会把 44 条路由解析成 32 条）。
+    if (/^[\w"'-]+:\s*[|>][-+]?\s*$/.test(body)) {
+      const blockIndent = (rawLines[i + 1]?.match(/^ */) ?? [''])[0].length;
+      const chunk = [];
+      while (i + 1 < rawLines.length) {
+        const next = rawLines[i + 1];
+        if (!next.trim()) {
+          chunk.push('');
+          i++;
+          continue;
+        }
+        const nextIndent = next.match(/^ */)[0].length;
+        if (nextIndent <= indent) break;
+        chunk.push(next.slice(Math.min(blockIndent, nextIndent)));
+        i++;
+      }
+      body = body.replace(/[|>][-+]?\s*$/, JSON.stringify(chunk.join('\n')));
+    }
+    lines.push({ indent, body });
   }
   let i = 0;
   const parseBlock = (indent) => {

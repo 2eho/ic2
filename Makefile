@@ -70,6 +70,8 @@ gen: ## 从 contracts/ 生成代码并校验一致性（契约先行）
 
 .PHONY: gen-check
 gen-check: ## 只校验生成物已提交（CI 用，不改文件）
+	# 先自检解析器：校验脚本自己错了会伪装成「代码错了」
+	node scripts/check-gen-parser.mjs
 	node scripts/gen-contracts.mjs --check
 
 # ---------------------------------------------------------------- 门禁

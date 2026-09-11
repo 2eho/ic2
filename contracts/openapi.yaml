@@ -134,6 +134,11 @@ paths:
     post:
       operationId: generate
       summary: 直通生成（工作台用，不落画布）；与画布共用执行引擎
+      description: |
+        references 是参考图的 assetId 列表（图生图 / 视频参考），上限 7 张。
+        它单独成字段而不是放进 params：资源引用需要类型校验与限额，
+        混进自由字典会变成「什么都能传」。
+        校验失败在**提交前**返回 422，不产生上游调用（与 ATK-20 同一条纪律）。
   /workspaces/{wid}/providers:
     get:
       operationId: listProviders
