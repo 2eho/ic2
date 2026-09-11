@@ -25,6 +25,7 @@ import (
 	"github.com/context-flow/ic/internal/provider"
 	"github.com/context-flow/ic/internal/provider/adapter/gemini"
 	"github.com/context-flow/ic/internal/provider/adapter/openai"
+	"github.com/context-flow/ic/internal/workspace"
 	"github.com/context-flow/ic/migrations"
 )
 
@@ -43,6 +44,7 @@ type App struct {
 	Agent     *agent.Service
 	MCP       api.MCPService
 	Auth      *identity.Service
+	Prefs     *workspace.Service
 
 	// resolver 供提交前校验（缺凭据要在提交时就报错，而不是异步失败）。
 	resolver *provider.CredentialResolver
@@ -159,6 +161,9 @@ func Build(ctx context.Context, o Options) (*App, error) {
 	// ---------------- 身份 ----------------
 	app.Auth = identity.New(db.DB, clock, ids, cfg)
 
+	// ---------------- 工作区偏好（含凭据 at-rest 加密） ----------------
+	app.Prefs = workspace.New(db.DB, cfg.EffectiveSecretKey(), clock)
+
 	// ---------------- Agent ----------------
 	agentSvc := agent.New(agent.Options{
 		DB:     db.DB,
@@ -200,6 +205,7 @@ func Build(ctx context.Context, o Options) (*App, error) {
 		Plugins:   app.Plugins,
 		Agent:     agent.NewAPIService(agentSvc),
 		Skills:    skillsStore,
+		Prefs:     NewPrefsAdapter(app.Prefs),
 		MCP:       app.MCP,
 		Auth:      app.Auth,
 		Meta:      &metaService{db: db},

@@ -96,6 +96,7 @@ lint: ## 静态检查：vet + 架构约束 + CI 配置 + 前端 tsc
 	$(GO) vet ./...
 	node scripts/check-cnb-config.mjs
 	node scripts/check-kernel-purity.mjs
+	node scripts/check-i18n-dupkeys.mjs
 	node scripts/check-node-schema.mjs
 	node scripts/check-boundaries.mjs
 	node scripts/check-features-boundary.mjs

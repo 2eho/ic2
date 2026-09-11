@@ -176,6 +176,14 @@ type ProviderService interface {
 	ListModels(ctx context.Context, wsID, capability string) ([]ModelDTO, error)
 }
 
+// ModelSaver 是「保存渠道模型」能力（可选实现，见 handler 的类型断言）。
+//
+// 用可空接口而不是塞进 ProviderService：只读部署可以不实现它，
+// 而 handler 用类型断言探测能力，比给 ProviderService 加一个永远报错的方法更诚实。
+type ModelSaver interface {
+	SaveModels(ctx context.Context, wsID, providerID string, models []ModelDTO) ([]ModelDTO, error)
+}
+
 // ProviderDTO 是渠道对外表示。
 type ProviderDTO struct {
 	ID           string   `json:"id"`
@@ -411,6 +419,19 @@ type AgentService interface {
 	GetSession(ctx context.Context, sessionID string) (*AgentSessionDTO, error)
 	SubmitTurn(ctx context.Context, sessionID, input, actor string) (*AgentTurnDTO, error)
 	Approve(ctx context.Context, sessionID, turnID, callID, actor string, approve bool) (*AgentTurnDTO, error)
+}
+
+// PrefsService 是工作区偏好用例接口（见 internal/workspace）。
+//
+// 单独一个接口而不是并进 AuthService：偏好是「内容配置」，
+// 而 Auth 管身份与工作区生命周期，两者变更频率与权限要求都不同。
+type PrefsService interface {
+	ReadPrefs(ctx context.Context, wsID string) (any, map[string]string, error)
+	UpdatePrefs(ctx context.Context, wsID string, patch map[string]any) (any, error)
+	PutSecrets(ctx context.Context, wsID string, values map[string]string) error
+	ExportPrefs(ctx context.Context, wsID string) (map[string]any, error)
+	ExportPrefsWithSecrets(ctx context.Context, wsID string) (map[string]any, error)
+	ImportPrefs(ctx context.Context, wsID string, payload map[string]any) (any, error)
 }
 
 // SkillService 是 Agent Skills 用例接口（见 internal/agent.SkillStore）。

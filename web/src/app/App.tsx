@@ -74,7 +74,18 @@ export function App() {
         />
         <Route path="/assets" element={<AssetsPage t={t} />} />
         <Route path="/prompts" element={<PromptsPage t={t} />} />
-        <Route path="/settings/*" element={<SettingsPage t={t} />} />
+        <Route
+          path="/settings/*"
+          element={
+            <SettingsPage
+              t={t}
+              theme={theme}
+              locale={locale}
+              onThemeChange={setTheme}
+              onLocaleChange={setLocale}
+            />
+          }
+        />
         <Route path="*" element={<NotFoundPage t={t} />} />
       </Route>
     </Routes>

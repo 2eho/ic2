@@ -152,6 +152,20 @@ export const api = {
     request<ProbeResult>(`/api/v1/workspaces/${wid}/providers/${pid}/test`, {
       method: "POST",
     }),
+  // saveModels：把勾选的模型与能力落库。
+  // 保存显式能力（而不是每次按关键词重猜）：关键词表演进时已保存配置不会漂移。
+  saveModels: (
+    wid: string,
+    providerId: string,
+    models: Array<{ id: string; capabilities: string[] }>,
+  ) =>
+    request<{ items: Model[] }>(
+      `/api/v1/workspaces/${wid}/providers/${providerId}/models`,
+      {
+        method: "POST",
+        body: { models },
+      },
+    ),
   listModels: (wid: string, capability = "") =>
     request<{ items: Model[] }>(
       `/api/v1/workspaces/${wid}/models?capability=${encodeURIComponent(capability)}`,
@@ -206,6 +220,26 @@ export const api = {
 
   // Agent Skills（9.14）：给模型的指令片段，不产生副作用，因此不需要审批；
   // 但它会进系统提示词，所以有长度与数量上限。
+  // 工作区偏好（服务端权威；含凭据 at-rest 加密）
+  getPrefs: (wid: string) =>
+    request<{ prefs: WorkspacePrefs; secrets: Record<string, string> }>(
+      `/api/v1/workspaces/${wid}/prefs`,
+    ),
+  updatePrefs: (wid: string, patch: WorkspacePrefs) =>
+    request<{ prefs: WorkspacePrefs; secrets: Record<string, string> }>(
+      `/api/v1/workspaces/${wid}/prefs`,
+      { method: "PATCH", body: { prefs: patch } },
+    ),
+  exportPrefs: (wid: string, includeSecrets = false) =>
+    request<Record<string, unknown>>(
+      `/api/v1/workspaces/${wid}/prefs/export?includeSecrets=${includeSecrets}`,
+    ),
+  importPrefs: (wid: string, payload: Record<string, unknown>) =>
+    request<{ prefs: WorkspacePrefs }>(
+      `/api/v1/workspaces/${wid}/prefs/import`,
+      { body: payload },
+    ),
+
   listSkills: (wid: string) =>
     request<{ items: AgentSkill[] }>(`/api/v1/workspaces/${wid}/agent-skills`),
   saveSkill: (wid: string, skill: AgentSkillInput) =>
@@ -218,6 +252,27 @@ export const api = {
       { method: "DELETE" },
     ),
 };
+
+export interface WorkspacePrefs {
+  theme?: "light" | "dark" | string;
+  locale?: "zh-CN" | "en-US" | string;
+  defaultModels?: {
+    image?: string;
+    video?: string;
+    text?: string;
+    audio?: string;
+  };
+  generation?: {
+    imageCount?: number;
+    audioVoice?: string;
+    audioFormat?: string;
+    audioSpeed?: string;
+    audioInstructions?: string;
+    systemPrompt?: string;
+  };
+  sync?: { enabled?: boolean; lastSyncedAt?: string; exportZip?: boolean };
+  ui?: Record<string, unknown>;
+}
 
 export interface AgentSkill {
   name: string;

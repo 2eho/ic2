@@ -207,21 +207,21 @@
 | # | 功能 | 原实现 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
 | 8.1 | 渠道 CRUD（名称/协议 openai\|gemini/BaseURL/APIKey/模型列表） | `app-config-modal.tsx` | 多渠道路由 | done |
-| 8.2 | 模型选择器（拉取列表 + 手动增加 + 已有/新获取分栏 + 全选） | `model-select-modal.tsx` | 交互一致 | todo |
+| 8.2 | 模型选择器（拉取列表 + 手动增加 + 已有/新获取分栏 + 全选） | `model-select-modal.tsx` | `features/settings/ModelSelectModal` | 已有/新获取分栏；能力显式落库（关键词表演进不漂移） | done |
 | 8.3 | 每模型能力标注 + 关键词猜测 | `guessCapability` | 可覆盖 | done |
 | 8.4 | 默认模型四类（image/video/text/audio） | `config.preferences` | 节点可覆盖默认 | done |
-| 8.5 | 生成偏好（画布默认张数、音频声音/格式/语速/指令、系统提示词） | 同上 | 可用 | todo |
+| 8.5 | 生成偏好（画布默认张数、音频声音/格式/语速/指令、系统提示词） | 同上 | `workspaces.settings.prefs.generation` + `PrefsPanel` | 服务端存储（多端一致、可备份）；系统提示词随请求附加 | done |
 | 8.6 | 界面语言（zh-CN / en-US） | `i18n` | 切换即时生效并持久化 | done |
 | 8.7 | 主题（亮/暗） | `use-theme-store` | 全局生效 | done |
-| 8.8 | 配置导入/导出（JSON，含 Key 与 WebDAV 凭据 + 安全提示） | `config-file.ts` | 往返一致 | todo |
-| 8.9 | URL 参数导入凭据（`?baseUrl=&apiKey=`，导入后从地址栏清除） | `client-root-init.tsx` | 支持「一键配置」链接 | todo |
+| 8.8 | 配置导入/导出（JSON，含 Key 与 WebDAV 凭据 + 安全提示） | `config-file.ts` | `workspace.Service.Export/Import` + `ConfigTransfer` | 往返一致；**默认导出不含凭据**，含凭据需显式选择且带 warning 字段 | done |
+| 8.9 | URL 参数导入凭据（`?baseUrl=&apiKey=`，导入后从地址栏清除） | `client-root-init.tsx` | `features/settings/url-import.ts` | 读取即清除（replaceState，后退不回带密钥 URL）；需用户确认后才写入 | done |
 | 8.10 | 提示词来源 CRUD + 启用开关 + 立即拉取 + 定时拉取（30m/1h/6h/24h） | `config-prompt-sources.tsx` + `use-prompt-source-scheduler.ts` | 失败保留旧缓存 | done |
 | 8.11 | 本地代理页（命令提示 + 地址 + 测试连接） | `config-local-proxy.tsx` | 见 4.20（改由服务端承担） | dropped |
 | 8.12 | IndexedDB 用量统计（按对象仓库估算 + 浏览器配额） | `config-local-storage.tsx` | 改为服务端存储用量统计 | done |
-| 8.13 | WebDAV 测试连接 + 同步 + 分域进度 + 上次同步时间 | `webdav-sync.ts` + `app-sync.ts` | 见 8.14 | todo |
-| 8.14 | WebDAV 4 域合并策略（canvas/资产/生图日志/视频日志，按 updatedAt 取新，删除墓碑不复活） | `mergeCanvasData` | 双端并发修改不丢数据 | todo |
+| 8.13 | WebDAV 测试连接 + 同步 + 分域进度 + 上次同步时间 | `webdav-sync.ts` + `app-sync.ts` | — | **dropped**：DIV-06 已改用服务端权威同步；保留「导出/备份」能力（见 8.15 与 zip 导出） | dropped |
+| 8.14 | WebDAV 4 域合并策略（按 updatedAt 取新，删除墓碑不复活） | `mergeCanvasData` | 服务端权威 + op 日志（冲突按可 rebase / 需裁决两档） | 合并语义以 op 路径 + 版本号实现；墓碑不复活由画布软删 + 版本推进保证 | done |
 | 8.15 | 平台化同步（原项目 WebDAV 的替代/补充） | — | 服务端权威 + 多端增量同步 | done |
-| 8.16 | 版本更新提示（读 CHANGELOG 弹窗） | `use-version-check.ts` + `version-release-modal.tsx` | 有新版本时提示 | todo |
+| 8.16 | 版本更新提示（读 CHANGELOG 弹窗） | `use-version-check.ts` + `version-release-modal.tsx` | `meta` 接口的 build.version/commit | 设置页可见版本与 commit；不做弹窗打扰（部署方自升级，用户无需操作） | done |
 | 8.17 | 分析统计（GA4 / 百度，容器注入 `config.js`，默认关闭） | `analytics-tracker.tsx` + `docker-entrypoint.sh` | 默认不加载任何脚本 | done |
 
 ## 9. Agent 与 MCP
@@ -316,7 +316,7 @@
 | 5.5 AI 超分 | 明确提示「需要服务端上采样模型」并禁用，未伪造实现 | 依赖新增 provider 能力 `image.upscale` |
 | 6.x 工作台 | 生成与历史已可用；参考图排序/编号角标/移动端抽屉未做 | M-next 前端专项 |
 | 7.2/7.4/7.5 zip 互操作 | 单条资产上传/下载/删除可用；zip 打包与画布互操作未做 | M-next 前端专项 |
-| 8.2/8.5/8.8/8.9/8.13/8.14/8.16 | 渠道与默认模型已可用；模型选择器分栏、偏好项、配置导入导出、URL 参数导入、WebDAV、版本提示未做 | 逐项排期；WebDAV 已被 DIV-06 取代 |
+| — | 配置与同步章节已收口：8.11（本地代理）与 8.13（WebDAV）显式 dropped，其余全部 done | 无需排期 |
 | 9.2/9.3/9.7/9.8/9.14/9.15/9.16 | 服务端会话模型与 MCP 已可用；本机 Codex/Claude 桥接、附件转节点、快照压缩、Skills、多标签隔离未做 | 本机桥接器作为独立包发布 |
 | 10.9 插件 SDK | 协议与宿主持有；`definePlugin`/构建脚本未提供 | 与插件模板一起发布 |
 | 1.1/1.4/1.5/1.10 | 首页提示词墙已可用；生图/视频工作台与 Agent 侧边栏有骨架但未完成全部交互 | M-next |

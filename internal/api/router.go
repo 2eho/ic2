@@ -25,6 +25,7 @@ type Deps struct {
 	Plugins   PluginService
 	Agent     AgentService
 	Skills    SkillService
+	Prefs     PrefsService
 	MCP       MCPService
 	Auth      AuthService
 	Meta      MetaService
@@ -48,6 +49,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
 	mux.HandleFunc("GET /api/v1/me", h.me)
+
+	// 工作区偏好（含凭据的 at-rest 加密存储与导入导出）
+	mux.HandleFunc("GET /api/v1/workspaces/{wid}/prefs", h.getWorkspacePrefs)
+	mux.HandleFunc("PATCH /api/v1/workspaces/{wid}/prefs", h.updateWorkspacePrefs)
+	mux.HandleFunc("GET /api/v1/workspaces/{wid}/prefs/export", h.exportWorkspacePrefs)
+	mux.HandleFunc("POST /api/v1/workspaces/{wid}/prefs/import", h.importWorkspacePrefs)
 
 	// 工作区与项目
 	mux.HandleFunc("GET /api/v1/workspaces", h.listWorkspaces)
@@ -91,6 +98,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/workspaces/{wid}/providers/{pid}/credentials", h.createCredential)
 	mux.HandleFunc("POST /api/v1/workspaces/{wid}/providers/{pid}/test", h.testProvider)
 	mux.HandleFunc("GET /api/v1/workspaces/{wid}/models", h.listModels)
+	mux.HandleFunc("POST /api/v1/workspaces/{wid}/providers/{pid}/models", h.saveModels)
 
 	// 提示词
 	mux.HandleFunc("GET /api/v1/workspaces/{wid}/prompt-sources", h.listPromptSources)

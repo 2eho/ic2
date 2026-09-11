@@ -3,10 +3,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/shared/api";
 import { useWorkspace } from "./useWorkspace";
 import { PluginManager } from "@/features/plugins/PluginManager";
+import { PrefsPanel } from "./PrefsPanel";
+import { ConfigTransfer } from "./ConfigTransfer";
+import { ModelSelectModal } from "./ModelSelectModal";
 import type { TFn } from "@/app/App";
 
 /** 配置中心：渠道/凭据/模型/提示词来源/插件/边界可见性。 */
-export function SettingsPage({ t }: { t: TFn }) {
+export function SettingsPage({
+  t,
+  theme = "light",
+  locale = "zh-CN",
+  onThemeChange = () => undefined,
+  onLocaleChange = () => undefined,
+}: {
+  t: TFn;
+  theme?: "light" | "dark";
+  locale?: "zh-CN" | "en-US";
+  onThemeChange?: (v: "light" | "dark") => void;
+  onLocaleChange?: (v: "zh-CN" | "en-US") => void;
+}) {
   const { workspaceId, ready } = useWorkspace();
   const qc = useQueryClient();
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.meta });
@@ -30,6 +45,10 @@ export function SettingsPage({ t }: { t: TFn }) {
   const [secret, setSecret] = useState("");
   const [credName, setCredName] = useState("默认");
   const [created, setCreated] = useState<{ masked: string } | null>(null);
+  const [modelPickerFor, setModelPickerFor] = useState<string | null>(null);
+  const [pickedModels, setPickedModels] = useState<Record<string, string[]>>(
+    {},
+  );
 
   const createCred = useMutation({
     mutationFn: async () => {
@@ -64,6 +83,26 @@ export function SettingsPage({ t }: { t: TFn }) {
     },
   });
 
+  const [testResult, setTestResult] = useState<{
+    providerId: string;
+    ok: boolean;
+    latencyMs: number;
+    modelCount: number;
+    code?: string;
+  } | null>(null);
+
+  const testProvider = useMutation({
+    mutationFn: (pid: string) => api.testProvider(workspaceId, pid),
+    onSuccess: (result, pid) =>
+      setTestResult({
+        providerId: pid,
+        ok: result.ok,
+        latencyMs: result.latencyMs,
+        modelCount: result.models?.length ?? 0,
+        ...(result.error?.code ? { code: result.error.code } : {}),
+      }),
+  });
+
   const syncSource = useMutation({
     mutationFn: (sid: string) => api.syncPromptSource(workspaceId, sid),
     onSuccess: () =>
@@ -73,6 +112,17 @@ export function SettingsPage({ t }: { t: TFn }) {
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <h1 style={{ fontSize: 20, marginTop: 0 }}>{t("settings.title")}</h1>
+
+      {/* 偏好（服务端权威）+ URL 参数导入凭据 */}
+      <PrefsPanel
+        t={t}
+        workspaceId={workspaceId}
+        ready={ready}
+        theme={theme}
+        locale={locale}
+        onThemeChange={onThemeChange}
+        onLocaleChange={onLocaleChange}
+      />
 
       {/* 渠道与凭据：密钥只提交一次，服务端加密，界面只显示掩码（INV-5） */}
       <section className="ic-card" style={{ padding: 16, marginBottom: 16 }}>
@@ -165,11 +215,44 @@ export function SettingsPage({ t }: { t: TFn }) {
                 borderTop: "1px solid var(--ic-border)",
               }}
             >
-              <strong>{p.name}</strong>{" "}
-              <span className="ic-dim">{p.baseUrl}</span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flexWrap: "wrap",
+                }}
+              >
+                <strong>{p.name}</strong>
+                <span className="ic-dim ic-mono" style={{ fontSize: 11 }}>
+                  {p.baseUrl}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="ic-btn"
+                  style={{ fontSize: 11, padding: "3px 8px" }}
+                  onClick={() => setModelPickerFor(p.id)}
+                >
+                  {t("settings.models")}
+                </button>
+                <button
+                  className="ic-btn"
+                  style={{ fontSize: 11, padding: "3px 8px" }}
+                  onClick={() => testProvider.mutate(p.id)}
+                >
+                  {t("settings.testConnection")}
+                </button>
+              </div>
               <div className="ic-dim" style={{ fontSize: 11 }}>
                 {p.capabilities.join(", ")}
               </div>
+              {testResult?.providerId === p.id && (
+                <div className="ic-dim" style={{ fontSize: 11 }}>
+                  {testResult.ok
+                    ? `${t("settings.testOk")} · ${testResult.latencyMs}ms · ${testResult.modelCount} ${t("settings.models")}`
+                    : t(`errors.${testResult.code ?? "internal"}`)}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -213,7 +296,51 @@ export function SettingsPage({ t }: { t: TFn }) {
         ))}
       </section>
 
+      {/* 配置导入导出（默认不含凭据） */}
+      <ConfigTransfer
+        t={t}
+        workspaceId={workspaceId}
+        onImported={() => void qc.invalidateQueries()}
+      />
+
+      {/* 配置导入导出（默认不含凭据） */}
+      <ConfigTransfer
+        t={t}
+        workspaceId={workspaceId}
+        onImported={() => void qc.invalidateQueries()}
+      />
+
       <PluginManager t={t} workspaceId={workspaceId} ready={ready} />
+
+      {modelPickerFor && (
+        <ModelSelectModal
+          t={t}
+          workspaceId={workspaceId}
+          providerId={modelPickerFor}
+          selected={pickedModels[modelPickerFor] ?? []}
+          onClose={() => setModelPickerFor(null)}
+          onSaved={(models) => {
+            setPickedModels((prev) => ({ ...prev, [modelPickerFor]: models }));
+            setModelPickerFor(null);
+            void qc.invalidateQueries({ queryKey: ["models", workspaceId] });
+          }}
+        />
+      )}
+
+      {modelPickerFor && (
+        <ModelSelectModal
+          t={t}
+          workspaceId={workspaceId}
+          providerId={modelPickerFor}
+          selected={pickedModels[modelPickerFor] ?? []}
+          onClose={() => setModelPickerFor(null)}
+          onSaved={(models) => {
+            setPickedModels((prev) => ({ ...prev, [modelPickerFor]: models }));
+            setModelPickerFor(null);
+            void qc.invalidateQueries({ queryKey: ["models", workspaceId] });
+          }}
+        />
+      )}
 
       {/* 边界可见性：不做静默的经验值（对齐 05 §3.2 与 11 §2.9） */}
       <section className="ic-card" style={{ padding: 16 }}>

@@ -250,6 +250,42 @@ export const enUS: Dict = {
       "The plugin update requests more permissions; confirm again",
     enable: "Enable",
     disable: "Disable",
+    appearance: "Appearance",
+    defaultModelsHint:
+      "Leave empty to follow the provider default; nodes and workbench can override per use",
+    followProviderDefault: "Follow default",
+    defaultImageCount: "Default image count on canvas",
+    audioVoice: "Audio voice",
+    audioFormat: "Audio format",
+    audioSpeed: "Audio speed",
+    systemPrompt: "System prompt",
+    systemPromptHint:
+      "Prepended to every generation request; leave empty to skip",
+    extraCredentials: "Extra credentials",
+    extraCredentialsHint:
+      "Only non-model credentials (e.g. extra tokens for a self-hosted relay). Encrypted server-side; only a mask is shown here",
+    selectedModels: "Selected models",
+    newlyFetched: "Newly fetched (unsaved)",
+    noNewModels: "No new models — add manually or test the connection first",
+    selectAll: "Select all",
+    manualModel: "Add a model ID manually",
+    capabilityHint:
+      "Capabilities are inferred from the model name and can be overridden server-side",
+    testOk: "Connection OK",
+    configTransfer: "Config import/export",
+    exportWithSecrets: "Export (with secrets)",
+    exportWithSecretsConfirm:
+      "This file contains plaintext credentials. Confirm you will store it safely. Continue?",
+    exportHint:
+      'Exports exclude credentials by default: export files often get shared. Use "Export (with secrets)" only for a full backup, and keep it safe',
+    exported: "Exported",
+    imported: "Imported (merge semantics — unspecified fields are kept)",
+    urlImportTitle: "One-click config link detected",
+    urlImportHint:
+      "The URL carried provider credentials. For safety they were already stripped from the address bar. Import them?",
+    urlImportConfirm: "Import",
+    urlImportCleared:
+      "URL parameters cleared — they will not reach browser history or the referer",
   },
   agent: {
     title: "Canvas assistant",

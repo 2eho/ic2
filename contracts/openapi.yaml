@@ -49,6 +49,24 @@ paths:
     post:
       operationId: createWorkspace
       summary: 创建工作区
+  /workspaces/{wid}/prefs:
+    get:
+      operationId: getWorkspacePrefs
+      summary: 读取工作区偏好与凭据掩码
+      description: |
+        偏好分两段：prefs（明文，可导出）与 secrets（at-rest 加密，只回掩码）。
+        因此「凭据只进不出」（INV-5）在偏好这一层也成立，不只在 provider_credentials 里成立。
+    patch:
+      operationId: updateWorkspacePrefs
+      summary: 合并更新偏好；写入凭据需要 ActManageConfig
+  /workspaces/{wid}/prefs/export:
+    get:
+      operationId: exportWorkspacePrefs
+      summary: 导出配置（默认不含凭据；includeSecrets=true 需更高角色）
+  /workspaces/{wid}/prefs/import:
+    post:
+      operationId: importWorkspacePrefs
+      summary: 导入配置（合并语义）；含 secrets 时需更高角色
   /workspaces/{wid}/projects:
     get:
       operationId: listProjects
@@ -161,6 +179,10 @@ paths:
     post:
       operationId: testProvider
       summary: 连通性探测（受 SSRF 防护约束）
+  /workspaces/{wid}/providers/{pid}/models:
+    post:
+      operationId: saveModels
+      summary: 保存渠道下勾选的模型与能力（能力显式落库，避免关键词表演进导致漂移）
   /workspaces/{wid}/models:
     get:
       operationId: listModels

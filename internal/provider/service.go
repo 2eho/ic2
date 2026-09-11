@@ -447,6 +447,45 @@ func (r *CredentialResolver) Resolve(cap Capability, providerID, credentialID st
 	return a, cred, true
 }
 
+// SaveModels 保存渠道下勾选的模型与能力（见 api.ModelSaver）。
+//
+// 校验归属：只能给本工作区的渠道保存模型，否则会跨工作区污染。
+func (s *Service) SaveModels(ctx context.Context, wsID, providerID string, models []api.ModelDTO) ([]api.ModelDTO, error) {
+	var exists int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM providers WHERE id = ? AND workspace_id = ?`, providerID, wsID).Scan(&exists); err != nil {
+		return nil, platform.AsError(err)
+	}
+	if exists == 0 {
+		return nil, platform.ErrNotFound("provider")
+	}
+	for _, m := range models {
+		if !validID(m.ID) {
+			return nil, platform.NewError(422, platform.CodeInvalidID, "模型 id 不合法: "+platform.Redact(m.ID))
+		}
+		caps := m.Capabilities
+		if len(caps) == 0 {
+			caps = GuessCapabilities(m.ID)
+		}
+		for _, c := range caps {
+			if !Valid(Capability(c)) {
+				return nil, platform.ErrInvalid("未知能力: " + c)
+			}
+		}
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO models (id, provider_id, display_name, capabilities, updated_at)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(provider_id, id) DO UPDATE SET
+			  display_name = excluded.display_name,
+			  capabilities = excluded.capabilities,
+			  updated_at = excluded.updated_at`,
+			m.ID, providerID, m.DisplayName, strings.Join(caps, ","), fmtTime(s.clock.Now())); err != nil {
+			return nil, platform.AsError(err)
+		}
+	}
+	return s.ListModels(ctx, wsID, "")
+}
+
 // resolveCredentialFor 按能力找渠道 → 取最高优先级凭据 → 解密。
 func (s *Service) resolveCredentialFor(ctx context.Context, cap Capability, providerID, credentialID string) (Credential, error) {
 	query := `
@@ -509,8 +548,8 @@ func (s *Service) providerCapabilities(ctx context.Context, pid string) ([]strin
 	return splitCSV(caps), nil
 }
 
-// SaveModels 保存渠道的模型列表（拉取后落库，避免每次进页面都请求上游）。
-func (s *Service) SaveModels(ctx context.Context, providerID string, models []api.ModelDTO) error {
+// SaveModelsRaw 保存渠道的模型列表（拉取后落库，避免每次进页面都请求上游）。
+func (s *Service) SaveModelsRaw(ctx context.Context, providerID string, models []api.ModelDTO) error {
 	for _, m := range models {
 		caps := m.Capabilities
 		if len(caps) == 0 {
