@@ -26,8 +26,13 @@ func BuiltinNodeTypes() []NodeTypeID {
 	return []NodeTypeID{NodeTypePrompt, NodeTypeImage, NodeTypeVideo, NodeTypeAudio, NodeTypeGroup, NodeTypeGeneration, NodeTypeRun}
 }
 
-// validTypeRe 限定类型必须匹配 ^[a-z][a-z0-9-]*(:[a-z0-9-]+)?$，防路径穿越（见 11 §2.4）。
-var validTypeRe = regexp.MustCompile(`^[a-z][a-z0-9-]*(:[a-z0-9-]+)?$`)
+// validTypeRe 限定内置类型：^[a-z][a-z0-9-]*$。
+var validTypeRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// pluginTypeRe 限定插件节点类型：<pluginKey>:<name>。
+// pluginKey 形如 com.example.demo（点分段），name 为 kebab-case。
+// 两者都禁止路径分隔符与控制字符，防路径穿越（见 11 §2.4）。
+var pluginTypeRe = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9-]*)+:[a-z][a-z0-9-]*$`)
 
 // ValidNodeTypeID 校验类型标识。
 func ValidNodeTypeID(t string) bool { return validTypeRe.MatchString(t) }

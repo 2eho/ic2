@@ -298,7 +298,12 @@ CREATE TABLE IF NOT EXISTS agent_turns (
   seq          INTEGER NOT NULL,
   status       TEXT NOT NULL DEFAULT 'pending',
   usage        TEXT NOT NULL DEFAULT '{}',
-  created_at   TEXT NOT NULL
+  -- input / pending / error 必须持久化：审批与回放跨请求、跨端、跨重启
+  input        TEXT NOT NULL DEFAULT '',
+  pending      TEXT,
+  error        TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_turns_session ON agent_turns(session_id, seq);
 

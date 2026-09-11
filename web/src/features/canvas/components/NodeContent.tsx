@@ -4,6 +4,7 @@ import type { CanvasKernel } from '../kernel';
 import type { RawNode } from '../kernel/types';
 import { useWorkspace } from '@/features/settings/useWorkspace';
 import { GenerationPanel } from './GenerationPanel';
+import { PluginNodeView } from '@/features/plugins/PluginNodeView';
 import type { TFn } from '@/app/App';
 
 interface Props {
@@ -32,7 +33,8 @@ export function NodeContent({ t, kernel, node, onCommit, onRun }: Props) {
     case 'run':
       return <RunAnchorContent t={t} node={node} />;
     default:
-      return <PluginContent t={t} node={node} />;
+      // 插件节点：走 iframe 沙箱宿主（未安装时给出明确安装提示）
+      return <PluginNodeView kernel={kernel} node={node} />;
   }
 }
 
@@ -142,12 +144,4 @@ function RunAnchorContent({ t, node }: { t: TFn; node: RawNode }) {
   );
 }
 
-/** 插件节点：渲染在 iframe 沙箱中（M5），未安装时给出明确提示而不是空白。 */
-function PluginContent({ t, node }: { t: TFn; node: RawNode }) {
-  const pluginKey = node.type.split(':')[0];
-  return (
-    <div className="ic-empty" style={{ padding: 12, fontSize: 12 }}>
-      {t('plugins.missing', { name: pluginKey })}
-    </div>
-  );
-}
+

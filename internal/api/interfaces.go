@@ -389,3 +389,58 @@ type Principal struct {
 type MetaService interface {
 	Ready(ctx context.Context) error
 }
+
+// AgentService 是 Agent 网关接口（由 internal/agent 实现）。
+type AgentService interface {
+	CreateSession(ctx context.Context, wsID, canvasID, backend, title string) (*AgentSessionDTO, error)
+	GetSession(ctx context.Context, sessionID string) (*AgentSessionDTO, error)
+	SubmitTurn(ctx context.Context, sessionID, input, actor string) (*AgentTurnDTO, error)
+	Approve(ctx context.Context, sessionID, turnID, callID, actor string, approve bool) (*AgentTurnDTO, error)
+}
+
+// AgentSessionDTO 是会话对外表示。
+type AgentSessionDTO struct {
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspaceId"`
+	CanvasID    string         `json:"canvasId"`
+	Backend     string         `json:"backend"`
+	ThreadID    string         `json:"threadId"`
+	Title       string         `json:"title"`
+	Permission  string         `json:"permission"`
+	Turns       []AgentTurnDTO `json:"turns"`
+	CreatedAt   time.Time      `json:"createdAt"`
+}
+
+// AgentTurnDTO 是轮次对外表示。
+type AgentTurnDTO struct {
+	ID        string           `json:"id"`
+	Seq       int              `json:"seq"`
+	Status    string           `json:"status"`
+	Input     string           `json:"input"`
+	Items     []AgentItemDTO   `json:"items"`
+	Usage     map[string]any   `json:"usage"`
+	Pending   *AgentPendingDTO `json:"pending,omitempty"`
+	Error     *ErrDTO          `json:"error,omitempty"`
+	CreatedAt time.Time        `json:"createdAt"`
+}
+
+// AgentPendingDTO 是待审批工具。
+type AgentPendingDTO struct {
+	CallID        string          `json:"callId"`
+	Tool          string          `json:"tool"`
+	Arguments     json.RawMessage `json:"arguments"`
+	OpCount       int             `json:"opCount"`
+	NodeIDs       []string        `json:"nodeIds,omitempty"`
+	EstCostMicros int64           `json:"estCostMicros"`
+}
+
+// AgentItemDTO 是条目对外表示。
+type AgentItemDTO struct {
+	ID        string          `json:"id"`
+	TurnID    string          `json:"turnId"`
+	Seq       int             `json:"seq"`
+	Kind      string          `json:"kind"`
+	Payload   json.RawMessage `json:"payload"`
+	Source    string          `json:"source"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
