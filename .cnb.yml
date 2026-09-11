@@ -1,43 +1,8 @@
 # IC 重写 · CI 与上游巡检
 # 设计说明：docs/design/12-legacy-and-upstream.md、docs/design/13-verification-and-iteration.md
 
-main:
-  # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）
-  "crontab: 0 3 * * 1":
-    - name: upstream-watch
-      docker:
-        image: node:22
-      env:
-        UPSTREAM_REPO: https://github.com/basketikun/infinite-canvas.git
-        UPSTREAM_REF: main
-      stages:
-        - name: 抽取上游契约面变化
-          script: |
-            set -euo pipefail
-            bash scripts/upstream-sync.sh || true
-            echo "---- change-report 摘要 ----"
-            node -e "
-              const fs = require('fs');
-              const p = 'upstream/change-report.json';
-              if (!fs.existsSync(p)) { console.log('无报告（上游未变化）'); process.exit(0); }
-              const r = JSON.parse(fs.readFileSync(p, 'utf8'));
-              console.log('verdict:', r.verdict);
-              console.log('from   :', r.from.version, r.from.commit);
-              console.log('to     :', r.to.version, r.to.commit);
-              const probes = r.probes || {};
-              for (const key of Object.keys(probes)) {
-                const value = probes[key];
-                if (Array.isArray(value) && value.length) console.log(key, '=>', value.slice(0, 20));
-                else if (key === 'limitsChanged' && Array.isArray(value) && value.length) console.log(key, '=>', value);
-              }
-            "
-
-  # PR / 推送门禁：lint → test → 边界/对等/安全 → 故障演练
-  "**":
-    - name: gate
-      docker:
-        image: golang:1.24
-      stages:
+# 门禁流水线的 stages 定义（YAML 锚点，push / pull_request 共用同一份，避免两处漂移）
+.gate-stages: &gate-stages
         - name: 静态检查
           script: |
             set -euo pipefail
@@ -73,6 +38,53 @@ main:
             go test ./internal/graph/ -run 'TestVersionConflict|TestRebaseable|TestATK21' -count=1
             go test ./internal/exec/ -run 'TestATK15|TestResume|TestCancel|TestPartialFailure' -count=1
             go test ./internal/asset/ -run 'TestGC' -count=1
+
+main:
+  # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）
+  "crontab: 0 3 * * 1":
+    - name: upstream-watch
+      docker:
+        image: node:22
+      env:
+        UPSTREAM_REPO: https://github.com/basketikun/infinite-canvas.git
+        UPSTREAM_REF: main
+      stages:
+        - name: 抽取上游契约面变化
+          script: |
+            set -euo pipefail
+            bash scripts/upstream-sync.sh || true
+            echo "---- change-report 摘要 ----"
+            node -e "
+              const fs = require('fs');
+              const p = 'upstream/change-report.json';
+              if (!fs.existsSync(p)) { console.log('无报告（上游未变化）'); process.exit(0); }
+              const r = JSON.parse(fs.readFileSync(p, 'utf8'));
+              console.log('verdict:', r.verdict);
+              console.log('from   :', r.from.version, r.from.commit);
+              console.log('to     :', r.to.version, r.to.commit);
+              const probes = r.probes || {};
+              for (const key of Object.keys(probes)) {
+                const value = probes[key];
+                if (Array.isArray(value) && value.length) console.log(key, '=>', value.slice(0, 20));
+                else if (key === 'limitsChanged' && Array.isArray(value) && value.length) console.log(key, '=>', value);
+              }
+            "
+
+  # PR / 推送门禁：lint → test → 边界/对等/安全 → 故障演练
+  # 注意：分支下的键必须是「事件名」；裸 "**" 不是事件名，会整条流水线不生效。
+  # 用 push + pull_request 覆盖 PR 与推送两种触发；"**" 只作为分支通配。
+  push:
+    - name: gate
+      docker:
+        image: golang:1.24
+      stages: *gate-stages
+
+  # 同上：PR 事件走同一套门禁（源分支 push 与 PR 创建/重开都会触发）
+  pull_request:
+    - name: gate
+      docker:
+        image: golang:1.24
+      stages: *gate-stages
 
 $:
   # 手动触发：按需巡检上游
