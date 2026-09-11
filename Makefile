@@ -44,19 +44,21 @@ fmt: ## 格式化 Go 与前端代码
 	cd web && pnpm exec prettier --write 'src/**/*.{ts,tsx,css}' 2>/dev/null || true
 
 .PHONY: lint
-lint: ## 静态检查：vet + staticcheck + tsc + eslint
+lint: ## 静态检查：vet + staticcheck + tsc + 架构约束
 	$(GO) vet ./...
 	@command -v staticcheck >/dev/null 2>&1 && staticcheck ./... || echo "staticcheck 未安装，跳过"
+	node scripts/check-kernel-purity.mjs
+	node scripts/check-node-schema.mjs
 	cd web && pnpm exec tsc --noEmit 2>/dev/null || echo "web 未安装依赖，跳过 tsc"
 
 .PHONY: test
 test: ## 单测 + 对抗用例（ATK-*）
-	$(GO) test ./... -count=1 -race -coverprofile=coverage.out
-	@cd web 2>/dev/null && pnpm exec vitest run 2>/dev/null || true
+	$(GO) test ./... -count=1 -timeout 180s -coverprofile=coverage.out
+	cd web && pnpm exec vitest run
 
 .PHONY: test-norace
 test-norace: ## 单测（不启用 race，供无 CGO 环境）
-	$(GO) test ./... -count=1
+	$(GO) test ./... -count=1 -timeout 180s
 
 .PHONY: cover
 cover: test ## 覆盖率报告
@@ -71,18 +73,23 @@ boundaries: ## 校验边界常量与文档一致（唯一真源 internal/graph/l
 	node scripts/check-boundaries.mjs
 
 .PHONY: sec
-sec: ## 安全门禁：凭据脱敏、SSRF、依赖漏洞
-	$(GO) test ./internal/platform/ -run 'TestRedact|TestSSRF' -count=1
+sec: ## 安全门禁：凭据脱敏、SSRF、插件权限、依赖漏洞
+	$(GO) test ./internal/platform/ -run 'TestRedact|TestSSRF|TestDrill' -count=1
+	$(GO) test ./internal/plugin/ -run 'TestATK09|TestSandbox|TestNetwork|TestInstallRejectsPermission' -count=1
+	$(GO) test ./internal/asset/ -run 'TestATK05|TestUploadSanitizes|TestCrossWorkspace' -count=1
 	node scripts/check-secrets.mjs
+	node scripts/check-kernel-purity.mjs
 	@command -v govulncheck >/dev/null 2>&1 && govulncheck ./... || echo "govulncheck 未安装，跳过"
 
 .PHONY: check
-check: lint test boundaries sec ## 本地全套门禁
+check: lint test boundaries parity sec drill ## 本地全套门禁（CI 用这一个）
 
 .PHONY: drill
-drill: ## 故障演练子集（进程崩溃 / 时钟回拨 / 并发冲突）
-	$(GO) test ./internal/graph/ -run 'TestVersionConflict|TestRebaseable' -count=1
-	$(GO) test ./internal/platform/ -run TestClockFake -count=1
+drill: ## 故障演练子集（时钟回拨 / 配置非法 / DB 不可用 / 重定向 SSRF / 并发）
+	$(GO) test ./internal/platform/ -run 'TestDrill' -count=1 -v
+	$(GO) test ./internal/graph/ -run 'TestVersionConflict|TestRebaseable|TestATK21' -count=1
+	$(GO) test ./internal/exec/ -run 'TestATK15|TestResume|TestCancel|TestPartialFailure' -count=1
+	$(GO) test ./internal/asset/ -run 'TestGC' -count=1
 
 .PHONY: gen
 gen: ## 从 contracts 生成产物并校验已提交（契约先行）

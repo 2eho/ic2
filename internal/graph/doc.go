@@ -317,3 +317,6 @@ func (d *CanvasDocument) ChildrenOf(groupID string) []string {
 	}
 	return out
 }
+
+// Now 返回当前时间（供 legacy 迁移与测试复用，避免各处直接 time.Now）。
+func Now() time.Time { return time.Now().UTC() }

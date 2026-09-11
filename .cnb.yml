@@ -1,12 +1,8 @@
-# 上游同步巡检：拉取参考项目 infinite-canvas 的「契约面」变化，产出差异报告。
-# 设计说明：docs/design/12-legacy-and-upstream.md
-#
-# 定位：只产出报告与待办，不自动改重写代码。
-# 定时触发放在默认分支；手动触发用于按需巡检。
+# IC 重写 · CI 与上游巡检
+# 设计说明：docs/design/12-legacy-and-upstream.md、docs/design/13-verification-and-iteration.md
 
-# 只读巡检，不发布制品；用最小权限
 main:
-  # 每周一 03:00（UTC）巡检一次上游
+  # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）
   "crontab: 0 3 * * 1":
     - name: upstream-watch
       docker:
@@ -16,10 +12,8 @@ main:
         UPSTREAM_REF: main
       stages:
         - name: 抽取上游契约面变化
-          # 无变化时脚本以 0 退出；有变化时产出 change-report.json 供人处理。
           script: |
             set -euo pipefail
-            git --version
             bash scripts/upstream-sync.sh || true
             echo "---- change-report 摘要 ----"
             node -e "
@@ -38,8 +32,50 @@ main:
               }
             "
 
+  # PR / 推送门禁：lint → test → 边界/对等/安全 → 故障演练
+  "**":
+    - name: gate
+      docker:
+        image: golang:1.24
+      stages:
+        - name: 静态检查
+          script: |
+            set -euo pipefail
+            go vet ./...
+            gofmt -l . | tee /tmp/fmt.txt
+            test ! -s /tmp/fmt.txt || (echo "以下文件未格式化：" && cat /tmp/fmt.txt && exit 1)
+
+        - name: 单元测试与对抗用例
+          script: |
+            set -euo pipefail
+            go test ./... -count=1 -timeout 300s
+
+        - name: 边界常量一致性
+          script: node scripts/check-boundaries.mjs
+
+        - name: 节点 schema 前后端一致性
+          script: node scripts/check-node-schema.mjs
+
+        - name: 对等矩阵覆盖率报告
+          script: node scripts/parity-report.mjs
+
+        - name: 安全门禁
+          script: |
+            set -euo pipefail
+            go test ./internal/platform/ -run 'TestRedact|TestSSRF|TestDrill' -count=1
+            go test ./internal/plugin/ -run 'TestATK09|TestSandbox|TestNetwork|TestInstallRejectsPermission' -count=1
+            go test ./internal/asset/ -run 'TestATK05|TestUploadSanitizes|TestCrossWorkspace' -count=1
+            node scripts/check-secrets.mjs
+
+        - name: 故障演练子集
+          script: |
+            set -euo pipefail
+            go test ./internal/graph/ -run 'TestVersionConflict|TestRebaseable|TestATK21' -count=1
+            go test ./internal/exec/ -run 'TestATK15|TestResume|TestCancel|TestPartialFailure' -count=1
+            go test ./internal/asset/ -run 'TestGC' -count=1
+
 $:
-  # 手动触发入口：需要立即巡检时使用
+  # 手动触发：按需巡检上游
   web_trigger_upstream:
     - name: upstream-watch-manual
       docker:
@@ -53,3 +89,24 @@ $:
             set -euo pipefail
             bash scripts/upstream-sync.sh || true
             test -f upstream/change-report.json && cat upstream/change-report.json || echo "上游未变化"
+
+  # 手动触发：前端构建与检查（需要 node 环境）
+  web_trigger_frontend:
+    - name: frontend-check
+      docker:
+        image: node:22
+      stages:
+        - name: 安装依赖
+          script: |
+            set -euo pipefail
+            cd web && corepack enable && (pnpm install --frozen-lockfile || pnpm install)
+        - name: 类型检查与单测
+          script: |
+            set -euo pipefail
+            cd web && pnpm exec tsc --noEmit && pnpm exec vitest run
+        - name: 生产构建
+          script: |
+            set -euo pipefail
+            cd web && pnpm build
+        - name: 内核纯度检查
+          script: node scripts/check-kernel-purity.mjs

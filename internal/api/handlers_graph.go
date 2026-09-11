@@ -132,6 +132,7 @@ func (h *handlers) importCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
+		// 新版结构
 		SourceProjectID string            `json:"sourceProjectId"`
 		ContentHash     string            `json:"contentHash"`
 		Name            string            `json:"name"`
@@ -139,9 +140,17 @@ func (h *handlers) importCanvas(w http.ResponseWriter, r *http.Request) {
 		Edges           []json.RawMessage `json:"edges"`
 		Viewport        *graph.Viewport   `json:"viewport,omitempty"`
 		Settings        map[string]any    `json:"settings,omitempty"`
+		// 旧版结构（浏览器 IndexedDB 导出）。存在时优先按 legacy 迁移。
+		Legacy json.RawMessage `json:"legacy,omitempty"`
 	}
 	if err := decodeBody(r, &in); err != nil {
 		writeError(w, r, err)
+		return
+	}
+
+	// 旧数据迁移路径：整段交给 legacy 包转换后统一校验，不存在"绕过校验"的旁路。
+	if len(in.Legacy) > 0 {
+		h.importLegacy(w, r, in.Legacy, in.Name, p.UserID)
 		return
 	}
 	if in.Name == "" {

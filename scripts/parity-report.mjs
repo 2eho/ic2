@@ -30,6 +30,7 @@ for (const rawLine of text.split('\n')) {
   if (/^\|\s*-+/.test(line)) continue;
   const cells = line.split('|').map((c) => c.trim());
   if (cells.length < 3) continue;
+  if (!/^\d+(\.\d+)?$/.test(cells[1] || '')) continue;
   const status = cells[cells.length - 2] || '';
   if (!['todo', 'wip', 'done', 'dropped'].includes(status)) continue;
   counts[status]++;
@@ -96,7 +97,7 @@ for (const rawLine of text.split('\n')) {
   if (/^(todo|wip|done|dropped)$/.test(last)) continue;
   // 跳过表头与说明行
   if (/^#/.test(cells[1] || '')) continue;
-  if (!/^\d/.test(cells[1] || '')) continue;
+  if (!/^\d+(\.\d+)?$/.test(cells[1] || '')) continue;
   unknown.push(cells[1]);
 }
 if (unknown.length) {

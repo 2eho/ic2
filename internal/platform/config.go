@@ -166,19 +166,33 @@ func (c Config) EffectiveSecretKey() []byte {
 	return []byte("ic-insecure-dev-key-do-not-use!!")[:32]
 }
 
+// decodeKey 解析主密钥，只接受 AES 合法长度（16/24/32 字节）。
+//
+// 刻意在此处就做长度校验：如果只做"能解码"，16 进制字符组成的短串会被
+// 当成密钥接受，然后在第一次加密时才失败——错误被推迟到运行期是设计缺陷。
 func decodeKey(raw string) ([]byte, error) {
 	raw = strings.TrimSpace(raw)
-	if b, err := base64.StdEncoding.DecodeString(raw); err == nil && len(b) > 0 {
-		return b, nil
+	valid := func(b []byte) ([]byte, bool) {
+		switch len(b) {
+		case 16, 24, 32:
+			return b, true
+		}
+		return nil, false
 	}
-	if b, err := hexDecode(raw); err == nil && len(b) > 0 {
-		return b, nil
+	if b, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		if key, ok := valid(b); ok {
+			return key, nil
+		}
 	}
-	// 允许直接给 32 字节字符串
-	if len(raw) == 32 {
+	if b, err := hexDecode(raw); err == nil {
+		if key, ok := valid(b); ok {
+			return key, nil
+		}
+	}
+	if len(raw) == 16 || len(raw) == 24 || len(raw) == 32 {
 		return []byte(raw), nil
 	}
-	return nil, fmt.Errorf("无法解析为 base64 / hex / 32 字节原文")
+	return nil, fmt.Errorf("密钥必须是 16/24/32 字节的 base64、hex 或原文")
 }
 
 func hexDecode(s string) ([]byte, error) {

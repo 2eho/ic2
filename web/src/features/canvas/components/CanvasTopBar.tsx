@@ -10,6 +10,7 @@ interface Props {
   canvasId: string;
   syncState: 'idle' | 'syncing' | 'error' | 'conflict' | 'offline';
   onToggleRuns: () => void;
+  onToggleAgent: () => void;
   onSaveViewport: () => void;
 }
 
@@ -31,7 +32,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Ctrl/Cmd + C / V', '复制粘贴'],
 ];
 
-export function CanvasTopBar({ t, kernel, canvasId, syncState, onToggleRuns, onSaveViewport }: Props) {
+export function CanvasTopBar({ t, kernel, canvasId, syncState, onToggleRuns, onToggleAgent, onSaveViewport }: Props) {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const vp = useKernelViewport(kernel);
 
@@ -66,6 +67,7 @@ export function CanvasTopBar({ t, kernel, canvasId, syncState, onToggleRuns, onS
       </span>
       {syncLabel && <span className="ic-badge ic-badge--warn">{syncLabel}</span>}
       <div style={{ flex: 1 }} />
+      <button className="ic-btn" onClick={onToggleAgent}>{t('agent.title')}</button>
       <button className="ic-btn" onClick={onToggleRuns}>{t('canvas.run.title')}</button>
       <button className="ic-btn" onClick={() => setShowShortcuts(true)}>{t('canvas.shortcuts')}</button>
       <button className="ic-btn" onClick={onSaveViewport}>保存视口</button>

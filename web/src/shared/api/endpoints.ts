@@ -98,6 +98,7 @@ export const api = {
   approveAgentTurn: (sid: string, tid: string, approve: boolean) =>
     request<AgentTurnDTO>(`/api/v1/agent/sessions/${sid}/turns/${tid}/approve`, { body: { approve } }),
   agentHistory: (sid: string) => request<AgentSessionDTO>(`/api/v1/agent/sessions/${sid}/history`),
+  getAgentSession: (sid: string) => request<AgentSessionDTO>(`/api/v1/agent/sessions/${sid}`),
 };
 
 export interface AgentSessionDTO {
@@ -105,15 +106,32 @@ export interface AgentSessionDTO {
   workspaceId: string;
   canvasId: string;
   backend: string;
+  threadId?: string;
   title: string;
+  permission?: string;
   turns: AgentTurnDTO[];
+  createdAt?: string;
 }
 
 export interface AgentTurnDTO {
   id: string;
   seq: number;
   status: string;
+  input?: string;
   items: AgentItemDTO[];
+  usage?: Record<string, number>;
+  pending?: AgentPendingDTO;
+  error?: { code: string; message: string };
+  createdAt?: string;
+}
+
+export interface AgentPendingDTO {
+  callId: string;
+  tool: string;
+  arguments: unknown;
+  opCount: number;
+  nodeIds?: string[];
+  estCostMicros: number;
 }
 
 export interface AgentItemDTO {

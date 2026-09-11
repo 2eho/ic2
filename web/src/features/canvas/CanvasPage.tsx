@@ -7,6 +7,7 @@ import { CanvasSurface } from './components/CanvasSurface';
 import { CanvasToolbar } from './components/CanvasToolbar';
 import { SidePanel } from './components/SidePanel';
 import { RunPanel } from './components/RunPanel';
+import { AgentSidebar } from '@/features/agent/AgentSidebar';
 import { CanvasTopBar } from './components/CanvasTopBar';
 import type { TFn } from '@/app/App';
 import type { Locale } from '@/shared/i18n';
@@ -21,6 +22,7 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
   const [syncState, setSyncState] = useState<SyncState>('idle');
   const [sidePanel, setSidePanel] = useState<'nodes' | 'assets' | 'prompts'>('nodes');
   const [showRuns, setShowRuns] = useState(false);
+  const [showAgent, setShowAgent] = useState(false);
   const [runTick, setRunTick] = useState(0);
 
   // 一画布一内核实例；切换画布时必须重建，否则会串数据
@@ -109,6 +111,7 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
         canvasId={canvasId}
         syncState={syncState}
         onToggleRuns={() => setShowRuns((v) => !v)}
+        onToggleAgent={() => setShowAgent((v) => !v)}
         onSaveViewport={() => sync.flushViewport()}
       />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -159,6 +162,9 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
               if (d) sync.flush();
             }}
           />
+          {showAgent && (
+            <AgentSidebar t={t} canvasId={canvasId} onClose={() => setShowAgent(false)} />
+          )}
           {showRuns && (
             <RunPanel
               t={t}
