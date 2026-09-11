@@ -1,9 +1,15 @@
-import { useState } from 'react';
-import { api } from '@/shared/api';
-import { Modal, collapseDataURIs } from './shared';
-import type { CommonProps } from './shared';
+import { useState } from "react";
+import { api } from "@/shared/api";
+import { Modal, collapseDataURIs } from "./shared";
+import type { CommonProps } from "./shared";
 
-export function InfoDialog({ t, node, onClose, assetId, workspaceId }: CommonProps) {
+export function InfoDialog({
+  t,
+  node,
+  onClose,
+  assetId,
+  workspaceId,
+}: CommonProps) {
   const [showJson, setShowJson] = useState(false);
   return (
     <Modal title={t("canvas.tool.info")} onClose={onClose}>

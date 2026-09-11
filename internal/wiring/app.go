@@ -129,6 +129,13 @@ func Build(ctx context.Context, o Options) (*App, error) {
 	resolver.Register("openai", openai.New(transport))
 	resolver.Register("gemini", gemini.New(transport))
 	resolver.Register("custom", openai.New(transport)) // 自定义渠道默认按 OpenAI 兼容协议
+	// 编译器与执行引擎共用同一份凭据解析：否则会出现
+	// 「手动触发能编译通过、Agent 触发编译失败」这种不一致。
+	compiler := exec.NewCompiler(func(cap provider.Capability, providerID, credentialID string) (provider.Credential, bool) {
+		_, cred, ok := resolver.Resolve(cap, providerID, credentialID)
+		return cred, ok
+	})
+
 	runs := exec.New(exec.Options{
 		Store:       exec.NewSQLStore(db.DB, db.Dialect),
 		Blobs:       NewAssetBlobs(app.Assets, fetcher),
@@ -161,6 +168,15 @@ func Build(ctx context.Context, o Options) (*App, error) {
 		// 服务端形态的模型客户端：复用同一套渠道适配器与凭据解析。
 		Model: newModelClient(app.Providers, transport, resolver),
 	})
+	// Agent 的外部能力注入（9.5–9.7、9.14）：每一项对应工具表里的一个能力组。
+	skillsStore := agent.NewSkillsSQLStore(db.DB, clock)
+	agentSvc.SetCapabilities(agent.Wire{
+		Runs:    &agentRuns{engine: runs, graph: app.Graph, compiler: compiler},
+		Assets:  &agentAssets{assets: app.Assets, fetch: fetcher},
+		Prompts: &agentPrompts{svc: app.Prompts},
+		Skills:  skillsStore,
+		Files:   &agentAssets{assets: app.Assets, fetch: fetcher},
+	})
 	app.Agent = agentSvc
 	app.MCP = agent.NewMCPHandler(agentSvc, func(ctx context.Context) (string, string, error) {
 		// MCP 客户端可能不带 workspace 上下文：默认取第一个工作区。
@@ -183,6 +199,7 @@ func Build(ctx context.Context, o Options) (*App, error) {
 		Prompts:   app.Prompts,
 		Plugins:   app.Plugins,
 		Agent:     agent.NewAPIService(agentSvc),
+		Skills:    skillsStore,
 		MCP:       app.MCP,
 		Auth:      app.Auth,
 		Meta:      &metaService{db: db},

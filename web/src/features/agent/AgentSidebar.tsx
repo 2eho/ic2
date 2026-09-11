@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/shared/api";
 import { useWorkspace } from "@/shared/session/workspace";
 import type { AgentItemDTO, AgentTurnDTO } from "@/shared/api/endpoints";
+import { useAgentSession, type BackendKind } from "./useAgentSession";
+import { BridgePanel } from "./BridgePanel";
+import { SkillsPanel } from "./SkillsPanel";
 import type { TFn } from "@/app/App";
 
 interface Props {
@@ -13,59 +14,29 @@ interface Props {
   onClose: () => void;
 }
 
+type Tab = "chat" | "tools" | "skills";
+
 /**
  * Agent 侧边栏（docs/design/07 §7）。
  *
  * 关键交互语义：
  * - 审批卡片必须展示「工具名 + 影响范围（op 数/节点数）+ 预估成本」；
- * - 批准后才能执行；执行结果带 inverse，支持一键撤销；
- * - 断线重连不重不丢由服务端主键幂等保证，前端只按 items 渲染。
+ *   只显示「要执行工具」等于让用户盲签；
+ * - 断线重连不重不丢由服务端主键幂等保证，前端只按 items 渲染；
+ * - 多标签隔离：写操作带 clientId，服务端据此只回给发起标签。
  */
 export function AgentSidebar({ t, canvasId, onClose }: Props) {
   const { workspaceId, ready } = useWorkspace();
-  const qc = useQueryClient();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const { state, actions } = useAgentSession(canvasId, workspaceId, ready);
   const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("chat");
 
-  const session = useQuery({
-    queryKey: ["agentSession", sessionId],
-    queryFn: () => api.getAgentSession(sessionId!),
-    enabled: Boolean(sessionId) && ready,
-    retry: false,
-  });
-
-  const createSession = useMutation({
-    mutationFn: () => api.createAgentSession(workspaceId, canvasId),
-    onSuccess: (s) => setSessionId(s.id),
-    onError: (e) => setError((e as { code?: string }).code ?? "internal"),
-  });
-
-  const sendTurn = useMutation({
-    mutationFn: async (text: string) => {
-      let sid = sessionId;
-      if (!sid) {
-        const s = await api.createAgentSession(workspaceId, canvasId);
-        sid = s.id;
-        setSessionId(sid);
-      }
-      return api.createAgentTurn(sid, text);
-    },
-    onSuccess: () => {
-      setInput("");
-      setError(null);
-      void qc.invalidateQueries({ queryKey: ["agentSession"] });
-    },
-    onError: (e) => setError((e as { code?: string }).code ?? "internal"),
-  });
-
-  const approve = useMutation({
-    mutationFn: ({ turn, ok }: { turn: AgentTurnDTO; ok: boolean }) =>
-      api.approveAgentTurn(sessionId!, turn.id, ok),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentSession"] }),
-  });
-
-  const turns = session.data?.turns ?? [];
+  const send = () => {
+    const text = input.trim();
+    if (!text || state.sending) return;
+    setInput("");
+    actions.send(text);
+  };
 
   return (
     <aside
@@ -74,8 +45,8 @@ export function AgentSidebar({ t, canvasId, onClose }: Props) {
         position: "absolute",
         right: 12,
         top: 12,
-        width: 400,
-        maxHeight: "82vh",
+        width: 420,
+        maxHeight: "84vh",
         display: "flex",
         flexDirection: "column",
         zIndex: 300,
@@ -85,44 +56,113 @@ export function AgentSidebar({ t, canvasId, onClose }: Props) {
         style={{
           display: "flex",
           alignItems: "center",
+          gap: 6,
           padding: 10,
           borderBottom: "1px solid var(--ic-border)",
         }}
       >
         <strong style={{ flex: 1 }}>{t("agent.title")}</strong>
-        <span className="ic-badge">{t("agent.serverAgent")}</span>
+        <select
+          className="ic-select"
+          style={{ width: "auto", fontSize: 11 }}
+          value={state.backend}
+          onChange={(e) => actions.setBackend(e.target.value as BackendKind)}
+          title={t("agent.permissionMode")}
+        >
+          <option value="server">{t("agent.serverAgent")}</option>
+          <option value="local">{t("agent.localAgent")}</option>
+        </select>
         <button className="ic-btn ic-btn--ghost" onClick={onClose}>
           ✕
         </button>
       </header>
 
+      <nav
+        style={{
+          display: "flex",
+          gap: 4,
+          padding: "6px 8px",
+          borderBottom: "1px solid var(--ic-border)",
+        }}
+      >
+        {(
+          [
+            ["chat", t("agent.title")],
+            ["tools", t("agent.tools")],
+            ["skills", t("agent.skills")],
+          ] as Array<[Tab, string]>
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "ic-btn ic-btn--primary" : "ic-btn"}
+            style={{ fontSize: 11, padding: "3px 8px" }}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <span
+          className="ic-dim ic-mono"
+          style={{ fontSize: 10 }}
+          title={t("agent.clientIsolation")}
+        >
+          {state.clientId.slice(0, 12)}
+        </span>
+      </nav>
+
       <div style={{ flex: 1, overflow: "auto", padding: 10 }}>
-        {!sessionId && (
-          <div className="ic-empty">
-            <p>{t("agent.sessions")}</p>
-            <button
-              className="ic-btn ic-btn--primary"
-              disabled={!ready || createSession.isPending}
-              onClick={() => createSession.mutate()}
-            >
-              {t("agent.newSession")}
-            </button>
-          </div>
+        {tab === "chat" && (
+          <>
+            {!state.sessionId && state.turns.length === 0 && (
+              <div className="ic-empty">
+                <button
+                  className="ic-btn ic-btn--primary"
+                  disabled={!ready}
+                  onClick={actions.createSession}
+                >
+                  {t("agent.newSession")}
+                </button>
+              </div>
+            )}
+            {state.turns.map((turn) => (
+              <TurnView
+                key={turn.id}
+                t={t}
+                turn={turn}
+                onApprove={(ok) => actions.approve(turn, ok)}
+              />
+            ))}
+          </>
         )}
 
-        {turns.map((turn) => (
-          <TurnView
-            key={turn.id}
-            t={t}
-            turn={turn}
-            onApprove={(ok) => approve.mutate({ turn, ok })}
-          />
-        ))}
+        {tab === "tools" && (
+          <>
+            <BridgePanel
+              t={t}
+              config={state.bridgeConfig}
+              health={state.bridgeHealth}
+              error={state.bridgeError}
+              onSave={actions.updateBridge}
+              onProbe={actions.probeBridge}
+            />
+            <ToolList t={t} />
+          </>
+        )}
+
+        {tab === "skills" && (
+          <SkillsPanel t={t} workspaceId={workspaceId} ready={ready} />
+        )}
       </div>
 
-      {error && (
-        <p className="ic-error" style={{ padding: "0 10px" }}>
-          {t(`errors.${error}`)}
+      {state.error && (
+        <p className="ic-error" style={{ padding: "0 10px", fontSize: 12 }}>
+          {t(
+            state.error.startsWith("errors.") ||
+              state.error.startsWith("agent.")
+              ? state.error
+              : `errors.${state.error}`,
+          )}
         </p>
       )}
 
@@ -140,19 +180,81 @@ export function AgentSidebar({ t, canvasId, onClose }: Props) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && input.trim())
-              sendTurn.mutate(input.trim());
+            if (e.key === "Enter" && !e.shiftKey) send();
           }}
         />
         <button
           className="ic-btn ic-btn--primary"
-          disabled={!input.trim() || sendTurn.isPending}
-          onClick={() => sendTurn.mutate(input.trim())}
+          disabled={!input.trim() || state.sending}
+          onClick={send}
         >
-          {sendTurn.isPending ? t("agent.sending") : t("common.confirm")}
+          {state.sending ? t("agent.sending") : t("common.confirm")}
         </button>
       </footer>
     </aside>
+  );
+}
+
+/** 工具清单：让用户先看到「Agent 能做什么」，再决定要不要用它。 */
+function ToolList({ t }: { t: TFn }) {
+  // 工具表由服务端生成（与 op schema 同源），这里展示的是它的静态镜像。
+  // 之所以不请求接口：工具表在会话内不变，多一次请求只会让面板闪烁。
+  const tools: Array<{
+    name: string;
+    scope: "read" | "write";
+    costs?: boolean;
+  }> = [
+    { name: "canvas.get_state", scope: "read" },
+    { name: "canvas.export_snapshot", scope: "read" },
+    { name: "canvas.apply_ops", scope: "write" },
+    { name: "canvas.create_text_node", scope: "write" },
+    { name: "canvas.create_attachment_nodes", scope: "write" },
+    { name: "canvas.create_generation_flow", scope: "write", costs: true },
+    { name: "canvas.run_generation", scope: "write", costs: true },
+    { name: "assets.search", scope: "read" },
+    { name: "prompts.search", scope: "read" },
+    { name: "runs.list", scope: "read" },
+    { name: "runs.get", scope: "read" },
+    { name: "skills.list", scope: "read" },
+    { name: "skills.save", scope: "write" },
+  ];
+  return (
+    <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+      {tools.map((tool) => (
+        <li
+          key={tool.name}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            padding: "4px 0",
+            borderTop: "1px solid var(--ic-border)",
+          }}
+        >
+          <code className="ic-mono" style={{ flex: 1 }}>
+            {tool.name}
+          </code>
+          <span
+            className={`ic-badge ${tool.scope === "write" ? "ic-badge--warn" : ""}`}
+            style={{ fontSize: 10 }}
+          >
+            {tool.scope}
+          </span>
+          {tool.costs && (
+            <span
+              className="ic-badge ic-badge--danger"
+              style={{ fontSize: 10 }}
+            >
+              ¥
+            </span>
+          )}
+        </li>
+      ))}
+      <li className="ic-dim" style={{ fontSize: 11, paddingTop: 6 }}>
+        {t("agent.toolConfirmHint", { ops: 0, nodes: 0 }).split("，")[0]}
+      </li>
+    </ul>
   );
 }
 
@@ -198,11 +300,21 @@ function TurnView({
         </span>
       </div>
 
+      {turn.input && (
+        <p className="ic-dim" style={{ fontSize: 12, margin: "2px 0" }}>
+          你：{turn.input}
+        </p>
+      )}
       {turn.items.map((item) => (
         <ItemView key={item.id} t={t} item={item} />
       ))}
+      {turn.error && (
+        <p className="ic-error" style={{ fontSize: 12 }}>
+          {turn.error.code}
+        </p>
+      )}
 
-      {/* 审批卡片：影响范围必须可见（不能只显示"要执行工具"） */}
+      {/* 审批卡片：影响范围与成本必须可见（不能只显示"要执行工具"） */}
       {turn.pending && (
         <div
           className="ic-card"
@@ -218,11 +330,11 @@ function TurnView({
               nodes: turn.pending.nodeIds?.length ?? 0,
             })}
           </div>
-          {turn.pending.estCostMicros === 0 && (
-            <div className="ic-dim" style={{ fontSize: 11 }}>
-              预估成本：未知（取决于模型价格表）
-            </div>
-          )}
+          <div className="ic-dim" style={{ fontSize: 11 }}>
+            {turn.pending.estCostMicros > 0
+              ? `预估成本 ¥${(turn.pending.estCostMicros / 1e6).toFixed(4)}`
+              : "预估成本：未知（取决于模型价格表）"}
+          </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             <button
               className="ic-btn ic-btn--primary"
@@ -250,6 +362,14 @@ function ItemView({ t, item }: { t: TFn; item: AgentItemDTO }) {
       return (
         <p style={{ fontSize: 13, margin: "4px 0", whiteSpace: "pre-wrap" }}>
           {String(payload.text ?? "")}
+          {payload.incomplete === true && (
+            <span
+              className="ic-badge ic-badge--warn"
+              style={{ fontSize: 10, marginLeft: 4 }}
+            >
+              未完整
+            </span>
+          )}
         </p>
       );
     case "reasoning":
@@ -272,17 +392,32 @@ function ItemView({ t, item }: { t: TFn; item: AgentItemDTO }) {
       const status = String(payload.status ?? "");
       return (
         <div
-          className={`ic-badge ${status === "ok" ? "ic-badge--ok" : status === "denied" ? "ic-badge--warn" : "ic-badge--danger"}`}
+          className={`ic-badge ${
+            status === "ok"
+              ? "ic-badge--ok"
+              : status === "denied"
+                ? "ic-badge--warn"
+                : "ic-badge--danger"
+          }`}
           style={{ fontSize: 11, margin: "4px 0" }}
         >
           {t("agent.toolResult")}: {status}
         </div>
       );
     }
+    case "file_change":
+      return (
+        <div className="ic-dim ic-mono" style={{ fontSize: 11 }}>
+          {String(payload.path ?? "")} {String(payload.summary ?? "")}
+        </div>
+      );
     case "error":
       return (
         <p className="ic-error" style={{ fontSize: 12 }}>
-          {t(`errors.${String(payload.code ?? "internal")}`)}
+          {String(
+            payload.message ??
+              t(`errors.${String(payload.code ?? "internal")}`),
+          )}
         </p>
       );
     default:

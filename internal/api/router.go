@@ -24,6 +24,7 @@ type Deps struct {
 	Prompts   PromptService
 	Plugins   PluginService
 	Agent     AgentService
+	Skills    SkillService
 	MCP       MCPService
 	Auth      AuthService
 	Meta      MetaService
@@ -102,6 +103,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/workspaces/{wid}/plugins/{key}/enable", h.enablePlugin)
 	mux.HandleFunc("GET /api/v1/plugins/{key}/{version}/bundle", h.pluginBundle)
 	mux.HandleFunc("GET /api/v1/plugin-registry", h.pluginRegistry)
+
+	// Agent Skills（模型指令片段，不产生副作用）
+	mux.HandleFunc("GET /api/v1/workspaces/{wid}/agent-skills", h.listSkills)
+	mux.HandleFunc("POST /api/v1/workspaces/{wid}/agent-skills", h.saveSkill)
+	mux.HandleFunc("DELETE /api/v1/workspaces/{wid}/agent-skills/{name}", h.deleteSkill)
 
 	// Agent
 	mux.HandleFunc("POST /api/v1/agent/sessions", h.createAgentSession)

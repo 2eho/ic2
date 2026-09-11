@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
-import type { TFn } from '@/app/App';
-import type { CanvasKernel } from '../../kernel';
-import type { RawNode } from '../../kernel/types';
+import type { ReactNode } from "react";
+import type { TFn } from "@/app/App";
+import type { CanvasKernel } from "../../kernel";
+import type { RawNode } from "../../kernel/types";
 
 /**
  * 图像工具对话框的公共契约。
@@ -40,11 +40,11 @@ export function Modal({
   return (
     <div
       style={{
-        position: 'fixed',
+        position: "fixed",
         inset: 0,
-        background: 'rgba(0,0,0,.35)',
-        display: 'grid',
-        placeItems: 'center',
+        background: "rgba(0,0,0,.35)",
+        display: "grid",
+        placeItems: "center",
         zIndex: 1000,
       }}
       onPointerDown={(e) => e.stopPropagation()}
@@ -53,15 +53,22 @@ export function Modal({
       <div
         className="ic-card"
         style={{
-          width: wide ? '80vw' : 520,
-          maxWidth: '92vw',
-          maxHeight: '88vh',
-          overflow: 'auto',
+          width: wide ? "80vw" : 520,
+          maxWidth: "92vw",
+          maxHeight: "88vh",
+          overflow: "auto",
           padding: 16,
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
           <strong>{title}</strong>
           <button className="ic-btn ic-btn--ghost" onClick={onClose}>
             ✕
@@ -74,10 +81,15 @@ export function Modal({
 }
 
 /** 折叠 data URI，避免在信息面板里把整段 base64 铺满屏幕。 */
-export function collapseDataURIs(spec: Record<string, unknown>): Record<string, unknown> {
+export function collapseDataURIs(
+  spec: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(spec)) {
-    out[k] = typeof v === 'string' && v.startsWith('data:') ? `<data-uri ${v.length} bytes>` : v;
+    out[k] =
+      typeof v === "string" && v.startsWith("data:")
+        ? `<data-uri ${v.length} bytes>`
+        : v;
   }
   return out;
 }

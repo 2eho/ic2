@@ -107,10 +107,15 @@ tsc: deps-web-check ## 前端类型检查
 test: ## 单测 + 对抗用例（ATK-*）
 	$(GO) test ./... -count=1 -timeout 300s -coverprofile=coverage.out
 	cd web && npm test
+	cd canvas-agent && node --test src/*.test.js
 
 .PHONY: test-go
 test-go: ## 仅 Go 单测（无前端依赖时用）
 	$(GO) test ./... -count=1 -timeout 300s
+
+.PHONY: test-agent
+test-agent: ## 本机桥接器单测（事件归一化 + 安全边界）
+	cd canvas-agent && node --test src/*.test.js
 
 .PHONY: cover
 cover: test ## 覆盖率报告
@@ -155,6 +160,11 @@ drill: ## 故障演练子集（时钟回拨 / 配置非法 / DB 不可用 / 重�
 	$(GO) test ./internal/identity/ -run 'TestATK22' -count=1
 	$(GO) test ./internal/contract/ -count=1
 
+.PHONY: agent-check
+agent-check: ## 桥接器静态检查（语法 + 安全约束）
+	@for f in canvas-agent/src/*.js; do node --check "$$f" || exit 1; done
+	@echo "canvas-agent 语法检查通过"
+
 .PHONY: e2e
 e2e: deps-web-check ## 端到端主链路（Playwright；缺浏览器时给出安装提示）
 	$(GO) test ./internal/api/apitest/ -count=1 -v
@@ -165,7 +175,7 @@ perf: deps-web-check ## 性能预算校验（内核 + 视口；见 docs/design/1
 	node scripts/perf-budget.mjs
 
 .PHONY: check
-check: preflight gen-check fmt-check lint test adversary boundaries parity sec drill ## 本地全套门禁（CI 用这一个）
+check: preflight gen-check fmt-check lint test test-agent agent-check adversary boundaries parity sec drill ## 本地全套门禁（CI 用这一个）
 
 .PHONY: check-all
 check-all: check tsc e2e perf ## 全套 + 前端类型/端到端/性能

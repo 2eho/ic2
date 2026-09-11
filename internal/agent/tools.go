@@ -126,6 +126,53 @@ func ToolSet() []ToolDef {
 			Approval: ApprovalAuto,
 			Scope:    "read",
 		},
+		{
+			Name:        "canvas.create_attachment_nodes",
+			Description: "把附件（图片/文件）落成画布图片节点，自动避让已有节点。",
+			InputSchema: schemaObject(map[string]any{
+				"attachments": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name": map[string]any{"type": "string"},
+							"mime": map[string]any{"type": "string"},
+							"url":  map[string]any{"type": "string"},
+							"data": map[string]any{"type": "string"},
+						},
+						"additionalProperties": false,
+					},
+					"minItems": 1,
+					"maxItems": 20,
+				},
+				"originX": map[string]any{"type": "number"},
+				"originY": map[string]any{"type": "number"},
+			}, []string{"attachments"}),
+			Approval: ApprovalConfirm,
+			Scope:    "write",
+		},
+		{
+			Name:        "skills.list",
+			Description: "列出当前工作区可用的 Agent Skills。",
+			InputSchema: schemaObject(nil),
+			Approval:    ApprovalAuto,
+			Scope:       "read",
+		},
+		{
+			Name:        "skills.save",
+			Description: "创建或更新一个 Skill（可复用的任务指令片段）。",
+			InputSchema: schemaObject(map[string]any{
+				"name":        map[string]any{"type": "string", "maxLength": 64},
+				"description": map[string]any{"type": "string", "maxLength": 500},
+				"instructions": map[string]any{
+					"type": "string", "maxLength": graph.MaxPromptBytes,
+				},
+				"enabled": map[string]any{"type": "boolean"},
+				"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			}, []string{"name", "instructions"}),
+			Approval: ApprovalConfirm,
+			Scope:    "write",
+		},
 	}
 }
 

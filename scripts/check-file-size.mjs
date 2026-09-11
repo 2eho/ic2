@@ -26,7 +26,7 @@ const walk = (dir, out = []) => {
   return out;
 };
 
-const roots = ['internal', 'cmd', 'web/src', 'scripts', 'migrations', 'contracts'];
+const roots = ['internal', 'cmd', 'web/src', 'web/e2e', 'canvas-agent/src', 'scripts', 'migrations', 'contracts'];
 const files = [];
 for (const r of roots) {
   try {

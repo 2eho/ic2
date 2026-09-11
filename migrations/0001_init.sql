@@ -378,3 +378,19 @@ CREATE TABLE IF NOT EXISTS model_pricing (
   updated_at             TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (provider_id, model_id)
 );
+
+-- Agent Skills（对齐 docs/design/10 §9.14）：可复用的任务指令片段，
+-- 与「工具」的区别：工具是可执行的原子能力，Skill 是给模型的**指令与约束**。
+-- 因此 Skill 不需要审批（它不产生副作用），但需要随工作区隔离。
+CREATE TABLE IF NOT EXISTS agent_skills (
+  workspace_id TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL DEFAULT '',
+  tags         TEXT NOT NULL DEFAULT '',
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  created_by   TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, name)
+);

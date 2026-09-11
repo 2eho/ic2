@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -656,4 +657,131 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	})()
+}
+
+// 未装配的能力必须返回 not_implemented，而不是「ok 但什么都没做」。
+//
+// 这条对应上一轮的真实缺陷：canvas.run_generation 返回
+// `{"note":"delegated to api layer"}` 且状态为 ok，用户看到「Agent 已触发生成」
+// 但画布毫无变化——谎报成功是最难排查的一类问题。
+func TestUnwiredToolsReportNotImplemented(t *testing.T) {
+	canvas := newFakeCanvas()
+	svc := newTestService(t, canvas, &fakeModel{text: "ok"})
+	ctx := context.Background()
+	sess, err := svc.CreateSession(ctx, "ws_1", "cv_1", BackendHTTP, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tool := range []string{
+		"assets.search", "prompts.search", "runs.list", "runs.get",
+		"canvas.create_attachment_nodes", "skills.list", "skills.save",
+		"canvas.run_generation",
+	} {
+		t.Run(tool, func(t *testing.T) {
+			res, err := svc.ExecuteTool(ctx, sess.CanvasID, "u_1", ToolCall{
+				ID: "c1", Name: tool, Arguments: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 参数校验可能先于能力检查（例如 run_generation 要求 nodeIds），
+			// 因此允许 invalid_request；但绝不允许「ok」。
+			if res.Status == "ok" {
+				t.Fatalf("%s 未装配时不得返回 ok（谎报成功）: %s", tool, string(res.Result))
+			}
+			if res.Error == nil {
+				t.Fatalf("%s 失败时必须给出错误信息", tool)
+			}
+		})
+	}
+}
+
+// run_generation 必须校验目标节点存在：否则执行在异步阶段才失败，
+// 用户看到的是「点了没反应」而不是一条可行动的提示。
+func TestRunGenerationRejectsUnknownNode(t *testing.T) {
+	canvas := newFakeCanvas()
+	svc := newTestService(t, canvas, &fakeModel{text: "ok"})
+	ctx := context.Background()
+	sess, err := svc.CreateSession(ctx, "ws_1", "cv_1", BackendHTTP, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.ExecuteTool(ctx, sess.CanvasID, "u_1", ToolCall{
+		ID:        "c1",
+		Name:      "canvas.run_generation",
+		Arguments: json.RawMessage(`{"nodeIds":["n_does_not_exist"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status == "ok" {
+		t.Fatal("不存在的节点不应通过校验")
+	}
+}
+
+// 工具表必须与 op schema 同源：op kind 增加时工具表要能自动反映。
+func TestToolSetMatchesOpSchema(t *testing.T) {
+	tools := ToolSet()
+	if len(tools) < 13 {
+		t.Fatalf("工具数量异常: %d", len(tools))
+	}
+	// apply_ops 的 schema 必须枚举全部 op kind，否则 Agent 无法使用新 op
+	var applyOps json.RawMessage
+	for _, tool := range tools {
+		if tool.Name == "canvas.apply_ops" {
+			applyOps = tool.InputSchema
+		}
+	}
+	if len(applyOps) == 0 {
+		t.Fatal("缺少 canvas.apply_ops")
+	}
+	for _, kind := range graph.AllOpKinds() {
+		if !strings.Contains(string(applyOps), string(kind)) {
+			t.Fatalf("apply_ops 的 schema 未包含 op kind %s（工具表与 op schema 漂移）", kind)
+		}
+	}
+}
+
+// 产生费用的工具在任何权限档位下都必须确认，只有 PermFull 例外。
+func TestCostlyToolsAlwaysRequireApproval(t *testing.T) {
+	costly := []string{"canvas.create_generation_flow", "canvas.run_generation"}
+	modes := []PermissionMode{PermRequest, PermAutomatic, PermFull}
+	for _, name := range costly {
+		def, ok := ToolByName(name)
+		if !ok {
+			t.Fatalf("%s 不在工具表里", name)
+		}
+		if !def.CostsMoney {
+			t.Fatalf("%s 应标记 CostsMoney（否则用户看不出它会花钱）", name)
+		}
+		for _, mode := range modes {
+			got := ApprovalFor(def, mode)
+			if mode == PermFull {
+				if got == ApprovalForbidden {
+					t.Fatalf("%s 在 full 档位不应被禁止", name)
+				}
+				continue
+			}
+			if got != ApprovalConfirm {
+				t.Fatalf("%s 在 %s 档位必须要求确认，实际 %s", name, mode, got)
+			}
+		}
+	}
+}
+
+// 写工具在自动档位下仍要确认；读工具在自动档位下可放行。
+func TestApprovalMatrix(t *testing.T) {
+	read, _ := ToolByName("canvas.get_state")
+	write, _ := ToolByName("canvas.create_text_node")
+
+	if ApprovalFor(read, PermAutomatic) != ApprovalAuto {
+		t.Fatal("读工具在 automatic 档位应放行")
+	}
+	if ApprovalFor(write, PermAutomatic) != ApprovalConfirm {
+		t.Fatal("写工具在 automatic 档位仍需确认")
+	}
+	if ApprovalFor(write, PermRequest) != ApprovalConfirm {
+		t.Fatal("写工具在 request 档位需确认")
+	}
 }

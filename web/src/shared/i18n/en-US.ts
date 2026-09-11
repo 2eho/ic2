@@ -243,6 +243,22 @@ export const enUS: Dict = {
     disconnected: "Disconnected, reconnecting…",
     localAgent: "Local agent",
     serverAgent: "Server agent",
+    bridgeUrl: "Bridge URL",
+    bridgeToken: "Access token",
+    bridgeTokenHint:
+      "The bridge token is NOT a model API key. It can only reach a 127.0.0.1-only port on your own machine, so it is safe in the browser; a model key can spend your money and therefore lives server-side only.",
+    bridgeStartHint: 'Start the bridge locally, then click "Test connection":',
+    bridgeUnknown: "Not probed",
+    bridgeNoBackend: "No local CLI detected",
+    bridgeUnreachable: "Bridge not running or wrong URL",
+    bridgeUnauthorized: "Invalid token",
+    bridgeBusy: "Previous turn is still running — wait or stop it",
+    tabs: "This tab",
+    skills: "Skills",
+    tools: "Tools",
+    clientIsolation:
+      "Each tab has its own session identity; actions never leak across tabs",
+    itemsFromLive: "Live",
   },
   plugins: {
     missing: "This node needs plugin {name}",

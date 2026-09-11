@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { api } from '@/shared/api';
-import { cropRect, splitGrid, upscaleTarget } from '../pure';
-import { Modal } from './shared';
-import type { CommonProps } from './shared';
+import { useState } from "react";
+import { api } from "@/shared/api";
+import { cropRect, splitGrid, upscaleTarget } from "../pure";
+import { Modal } from "./shared";
+import type { CommonProps } from "./shared";
 
 export function CropDialog({
   t,
@@ -94,7 +94,6 @@ export function CropDialog({
   );
 }
 
-
 function square(natural: { w: number; h: number }, ratio: number) {
   const w = Math.min(natural.w, Math.round(natural.h * ratio));
   const h = Math.round(w / ratio);
@@ -106,8 +105,13 @@ function square(natural: { w: number; h: number }, ratio: number) {
   };
 }
 
-
-export function SplitDialog({ t, kernel, node, onClose, onCommit }: CommonProps) {
+export function SplitDialog({
+  t,
+  kernel,
+  node,
+  onClose,
+  onCommit,
+}: CommonProps) {
   const [rows, setRows] = useState(2);
   const [cols, setCols] = useState(2);
   const [error, setError] = useState<string | null>(null);
@@ -184,8 +188,13 @@ export function SplitDialog({ t, kernel, node, onClose, onCommit }: CommonProps)
   );
 }
 
-
-export function UpscaleDialog({ t, kernel, node, onClose, onCommit }: CommonProps) {
+export function UpscaleDialog({
+  t,
+  kernel,
+  node,
+  onClose,
+  onCommit,
+}: CommonProps) {
   const natural = {
     w: Number(node.spec.naturalW) || 1024,
     h: Number(node.spec.naturalH) || 1024,

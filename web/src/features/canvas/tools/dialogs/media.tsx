@@ -1,9 +1,15 @@
-import { useState } from 'react';
-import { frameTime } from '../pure';
-import { Modal } from './shared';
-import type { CommonProps } from './shared';
+import { useState } from "react";
+import { frameTime } from "../pure";
+import { Modal } from "./shared";
+import type { CommonProps } from "./shared";
 
-export function VideoFrameDialog({ t, kernel, node, onClose, onCommit }: CommonProps) {
+export function VideoFrameDialog({
+  t,
+  kernel,
+  node,
+  onClose,
+  onCommit,
+}: CommonProps) {
   const durationMs = Number(node.spec.durationMs ?? 0);
   const [kind, setKind] = useState<"first" | "last" | "current">("first");
   const time = frameTime(kind, durationMs / 1000, 0);

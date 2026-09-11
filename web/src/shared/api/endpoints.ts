@@ -187,7 +187,39 @@ export const api = {
     request<AgentSessionDTO>(`/api/v1/agent/sessions/${sid}/history`),
   getAgentSession: (sid: string) =>
     request<AgentSessionDTO>(`/api/v1/agent/sessions/${sid}`),
+
+  // Agent Skills（9.14）：给模型的指令片段，不产生副作用，因此不需要审批；
+  // 但它会进系统提示词，所以有长度与数量上限。
+  listSkills: (wid: string) =>
+    request<{ items: AgentSkill[] }>(`/api/v1/workspaces/${wid}/agent-skills`),
+  saveSkill: (wid: string, skill: AgentSkillInput) =>
+    request<AgentSkill>(`/api/v1/workspaces/${wid}/agent-skills`, {
+      body: skill,
+    }),
+  deleteSkill: (wid: string, name: string) =>
+    request<{ ok: boolean }>(
+      `/api/v1/workspaces/${wid}/agent-skills/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    ),
 };
+
+export interface AgentSkill {
+  name: string;
+  description: string;
+  instructions: string;
+  tags: string[];
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AgentSkillInput {
+  name: string;
+  instructions: string;
+  description?: string;
+  tags?: string[];
+  enabled?: boolean;
+}
 
 export interface AgentSessionDTO {
   id: string;

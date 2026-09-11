@@ -398,6 +398,17 @@ type AgentService interface {
 	Approve(ctx context.Context, sessionID, turnID, callID, actor string, approve bool) (*AgentTurnDTO, error)
 }
 
+// SkillService 是 Agent Skills 用例接口（见 internal/agent.SkillStore）。
+//
+// 有意用 map[string]any 而不是强类型 DTO：Skill 的字段是「给模型看的自由文本」，
+// 强类型化会诱使调用方在 DTO 层做校验，而真正的校验（长度、数量上限、归属）
+// 必须发生在存储层——那里才是唯一能保证不变量成立的边界。
+type SkillService interface {
+	ListSkills(ctx context.Context, wsID string) ([]map[string]any, error)
+	UpsertSkill(ctx context.Context, wsID string, skill map[string]any) (map[string]any, error)
+	DeleteSkill(ctx context.Context, wsID, name string) error
+}
+
 // AgentSessionDTO 是会话对外表示。
 type AgentSessionDTO struct {
 	ID          string         `json:"id"`

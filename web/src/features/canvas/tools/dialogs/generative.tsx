@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { api } from '@/shared/api';
-import { reversePromptPlan, buildAnglePrompt } from '../pure';
-import type { AngleSpec } from '../pure';
-import { Modal } from './shared';
-import type { CommonProps } from './shared';
+import { useEffect, useRef, useState } from "react";
+import { api } from "@/shared/api";
+import { reversePromptPlan, buildAnglePrompt } from "../pure";
+import type { AngleSpec } from "../pure";
+import { Modal } from "./shared";
+import type { CommonProps } from "./shared";
 
-export function AngleDialog({ t, kernel, node, onClose, onCommit }: CommonProps) {
+export function AngleDialog({
+  t,
+  kernel,
+  node,
+  onClose,
+  onCommit,
+}: CommonProps) {
   const [spec, setSpec] = useState<AngleSpec>({
     horizontal: 0,
     pitch: 0,
@@ -94,7 +100,6 @@ export function AngleDialog({ t, kernel, node, onClose, onCommit }: CommonProps)
   );
 }
 
-
 export function ReversePromptDialog({
   t,
   kernel,
@@ -140,7 +145,6 @@ export function ReversePromptDialog({
     </Modal>
   );
 }
-
 
 export function MaskDialog({
   t,

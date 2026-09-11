@@ -1,5 +1,6 @@
 -- 回滚 0001_init：按外键依赖逆序 drop（先 drop 依赖表，再 drop 被依赖表）。
 -- 与 0001_init.sql 的表/索引清单严格对应，由 internal/platform/db_test.go 双向校验。
+DROP TABLE IF EXISTS agent_skills;
 DROP TABLE IF EXISTS model_pricing;
 DROP TABLE IF EXISTS models;
 DROP INDEX IF EXISTS idx_audit_ws;

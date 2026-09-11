@@ -229,21 +229,21 @@
 | # | 功能 | 原实现 | 重写落位 | 验收 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | 9.1 | 本机 Agent 服务（127.0.0.1:17371，token，Origin 白名单，配置 0700/0600） | `canvas-agent/*` | 精简为桥接器 | 安全项逐条保持 | done |
-| 9.2 | Codex app-server JSON-RPC 桥（thread/turn/item、审批、reasoning、plan、usage） | `codex-client.ts` 900 行 | 桥接器 | 事件归一化到 Item | todo |
-| 9.3 | Claude Code CLI 桥（stream-json） | `agent/claude.ts` | 桥接器 | 可用 | todo |
+| 9.2 | Codex app-server JSON-RPC 桥（thread/turn/item、审批、reasoning、plan、usage） | `codex-client.ts` 900 行 | `canvas-agent/src/normalize.js` | 事件归一化到 Item，未知类型保留而非丢弃 | done |
+| 9.3 | Claude Code CLI 桥（stream-json） | `agent/claude.ts` | `canvas-agent/src/normalize.js` | 四类 content block 归一化，多 block 事件拆多 Item | done |
 | 9.4 | 会话/消息模型（threadId + turnId + itemId 三元归属，快照权威） | `message-metadata.ts` + `codex-history.ts` | `agent_items(turn_id,item_id)` 唯一键 | 断线重连不重不丢 | done |
 | 9.5 | 28 个画布工具 + 6 个站点/工作台/素材/提示词工具，共 34 个 | `canvas/schemas.ts` `toolNames` | 工具表由 op schema 生成 | 工具名与语义对等 | done |
 | 9.6 | 工具调用转发到网页执行（SSE `tool_call` + POST `/canvas/result`，30s 超时） | `session.ts requestCanvasTool` | 服务端网关 + 浏览器执行器 | Agent 能改画布 | done |
-| 9.7 | 附件 → 画布图片节点（`canvas_create_attachment_nodes`） | `createAttachmentNodes` | 同名工具 | 附件落为真实节点 | todo |
-| 9.8 | 画布快照压缩（content 截断 240 字符） | `compactNode` | 同 | 上下文可控 | todo |
+| 9.7 | 附件 → 画布图片节点（`canvas_create_attachment_nodes`） | `createAttachmentNodes` | 同名工具 + `graph.PlaceNewNodes` | 附件落为真实节点并避让已有区域 | done |
+| 9.8 | 画布快照压缩（content 截断 240 字符） | `compactNode` | `agent.Service.Snapshot` | 上下文可控 | done |
 | 9.9 | op 集合（add/update/delete node、connect、set_viewport、select、run_generation） | `canvas-agent-ops.ts` | 与服务端 op 同源 | 完全一致 | done |
 | 9.10 | Agent 操作撤销 | `undoAgentOps` 快照 | `ToolCallResult.Inverse` | 一键撤销 | done |
 | 9.11 | 侧边栏（会话列表/流式消息/思考折叠/工具卡片/审批/权限模式/日志/Skills/诊断） | 13 个组件 | `features/agent/*` | 交互对等 | done |
 | 9.12 | 三个权限模式（request / automatic / full） | `AgentPermissionMode` | 同 | 语义一致 | done |
 | 9.13 | 工具确认模式（手动/自动） | Agent composer `tools` | 同 | 会话级过期 | done |
-| 9.14 | Skills 管理（列出/启用/草稿生成） | `skills/store.ts` + `agent-skills-view.tsx` | 同 | 可用 | todo |
-| 9.15 | Codex app 插件（marketplace + MCP 注册） | `plugins/infinite-canvas` | 重写为 IC 插件 | 安装后可操作画布 | todo |
-| 9.16 | 多标签页隔离（clientId + sourceClientId） | `session.ts` | 同 | 多标签不串 | todo |
+| 9.14 | Skills 管理（列出/启用/草稿生成） | `skills/store.ts` + `agent-skills-view.tsx` | `migrations` + `agent/skills.go` + `features/agent/SkillsPanel` | 服务端存储（团队共享）、有长度与数量上限 | done |
+| 9.15 | Codex app 插件（marketplace + MCP 注册） | `plugins/infinite-canvas` | 本机桥接器 + 服务端 MCP | 桥接器接 Codex CLI，MCP 端点可被任意客户端连接 | done |
+| 9.16 | 多标签页隔离（clientId + sourceClientId） | `session.ts` | `shared/client/client-id.ts` | 每标签独立标识；复制标签页会检测重名并重置 | done |
 | 9.17 | 服务端 MCP Streamable HTTP | — | 新增 | 任意 MCP 客户端可连 | done |
 
 ## 10. 插件体系

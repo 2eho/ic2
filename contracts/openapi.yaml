@@ -187,6 +187,17 @@ paths:
     get:
       operationId: pluginRegistry
       summary: 官方插件注册表
+  /workspaces/{wid}/agent-skills:
+    get:
+      operationId: listSkills
+      summary: 列出 Agent Skills（模型指令片段）
+    post:
+      operationId: saveSkill
+      summary: 创建或更新 Skill（有长度与数量上限）
+  /workspaces/{wid}/agent-skills/{name}:
+    delete:
+      operationId: deleteSkill
+      summary: 删除 Skill
   /agent/sessions:
     post:
       operationId: createAgentSession

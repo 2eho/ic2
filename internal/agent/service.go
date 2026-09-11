@@ -53,6 +53,38 @@ type ToolCall struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// RunTrigger 触发一次生成运行（由 api/exec 侧实现）。
+//
+// 为什么用回调而不是直接依赖 exec：internal/agent 与 internal/exec 是同级领域包，
+// 互相 import 会形成循环依赖，也会让 agent 的测试被迫拉起整个执行引擎。
+// 回调把「触发运行」变成一个明确的注入点，同时保留了「agent 不做特权操作」这一约束。
+type RunTrigger interface {
+	TriggerRun(ctx context.Context, canvasID string, nodeIDs []string, actor string) (runID string, err error)
+}
+
+// AssetLister 在工作区素材库中检索（由 asset 侧实现）。
+type AssetLister interface {
+	SearchAssets(ctx context.Context, wsID, query, kind string, limit int) ([]map[string]any, error)
+}
+
+// PromptSearcher 在提示词库中检索（由 prompt 侧实现）。
+type PromptSearcher interface {
+	SearchPrompts(ctx context.Context, wsID, query string, tags []string, limit int) ([]map[string]any, error)
+}
+
+// RunLister 列出运行记录（由 exec 侧实现）。
+type RunLister interface {
+	ListRunsBrief(ctx context.Context, wsID, canvasID string, limit int) ([]map[string]any, error)
+	GetRunBrief(ctx context.Context, wsID, runID string) (map[string]any, error)
+}
+
+// SkillStore 读写 Agent Skills（9.14）。
+type SkillStore interface {
+	ListSkills(ctx context.Context, wsID string) ([]map[string]any, error)
+	UpsertSkill(ctx context.Context, wsID string, skill map[string]any) (map[string]any, error)
+	DeleteSkill(ctx context.Context, wsID, name string) error
+}
+
 // Service 是 Agent 网关。
 type Service struct {
 	db     *sql.DB
@@ -62,6 +94,37 @@ type Service struct {
 	ids    platform.IDGen
 	// snapshotLimit 是画布快照中单节点内容的截断长度（对齐原项目 240 字符）。
 	snapshotLimit int
+
+	// 以下为可选能力注入：未注入时对应工具返回明确的 not_implemented，
+	// 而不是「返回 ok 但什么都没做」（上一轮 canvas.run_generation 就是这个毛病）。
+	runs    RunTrigger
+	assets  AssetLister
+	prompts PromptSearcher
+	runList RunLister
+	skills  SkillStore
+	// downloads 把 URL 落成资产（附件转节点用）。
+	files AttachmentFetcher
+}
+
+// AttachmentFetcher 把外部资源/内联数据落成工作区资产（9.7）。
+type AttachmentFetcher interface {
+	StoreAttachment(ctx context.Context, wsID, name, mime, url, dataURI string) (assetID string, err error)
+}
+
+// Wire 注入可选能力。集中成一个方法而不是若干 SetXxx：
+// 装配方一眼能看到「agent 依赖哪些外部能力」，漏注入会在测试里直接暴露。
+type Wire struct {
+	Runs    RunTrigger
+	Assets  AssetLister
+	Prompts PromptSearcher
+	RunList RunLister
+	Skills  SkillStore
+	Files   AttachmentFetcher
+}
+
+// SetCapabilities 注入外部能力。
+func (s *Service) SetCapabilities(w Wire) {
+	s.runs, s.assets, s.prompts, s.runList, s.skills, s.files = w.Runs, w.Assets, w.Prompts, w.RunList, w.Skills, w.Files
 }
 
 // Options 构造参数。
@@ -308,6 +371,107 @@ func (s *Service) ExecuteTool(ctx context.Context, canvasID, actor string, call 
 		}
 		return ToolCallResult{CallID: call.ID, Status: "ok", Result: snap}, nil
 
+	case "assets.search":
+		if s.assets == nil {
+			return notWired(call, "assets.search"), nil
+		}
+		var args struct {
+			Query string `json:"query"`
+			Kind  string `json:"kind"`
+			Limit int    `json:"limit"`
+		}
+		if err := strictDecode(call.Arguments, &args); err != nil {
+			return invalidArgs(call, err), nil
+		}
+		items, err := s.assets.SearchAssets(ctx, s.workspaceOf(ctx, canvasID), args.Query, args.Kind, clampLimit(args.Limit, 20))
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, map[string]any{"items": items}), nil
+
+	case "prompts.search":
+		if s.prompts == nil {
+			return notWired(call, "prompts.search"), nil
+		}
+		var args struct {
+			Query string   `json:"query"`
+			Tags  []string `json:"tags"`
+			Limit int      `json:"limit"`
+		}
+		if err := strictDecode(call.Arguments, &args); err != nil {
+			return invalidArgs(call, err), nil
+		}
+		items, err := s.prompts.SearchPrompts(ctx, s.workspaceOf(ctx, canvasID), args.Query, args.Tags, clampLimit(args.Limit, 20))
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, map[string]any{"items": items}), nil
+
+	case "runs.list":
+		if s.runList == nil {
+			return notWired(call, "runs.list"), nil
+		}
+		var args struct {
+			Limit int `json:"limit"`
+		}
+		_ = strictDecode(call.Arguments, &args)
+		items, err := s.runList.ListRunsBrief(ctx, s.workspaceOf(ctx, canvasID), canvasID, clampLimit(args.Limit, 20))
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, map[string]any{"items": items}), nil
+
+	case "runs.get":
+		if s.runList == nil {
+			return notWired(call, "runs.get"), nil
+		}
+		var args struct {
+			RunID string `json:"runId"`
+		}
+		if err := strictDecode(call.Arguments, &args); err != nil || args.RunID == "" {
+			return invalidArgs(call, errors.New("runId is required")), nil
+		}
+		item, err := s.runList.GetRunBrief(ctx, s.workspaceOf(ctx, canvasID), args.RunID)
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, item), nil
+
+	case "canvas.create_attachment_nodes":
+		return s.createAttachmentNodes(ctx, canvasID, actor, call)
+
+	case "skills.list":
+		if s.skills == nil {
+			return notWired(call, "skills.list"), nil
+		}
+		wsID := s.workspaceOf(ctx, canvasID)
+		if wsID == "" {
+			return toolError(call, platform.ErrNotFound("workspace")), nil
+		}
+		items, err := s.skills.ListSkills(ctx, wsID)
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, map[string]any{"items": items}), nil
+
+	case "skills.save":
+		if s.skills == nil {
+			return notWired(call, "skills.save"), nil
+		}
+		wsID := s.workspaceOf(ctx, canvasID)
+		if wsID == "" {
+			return toolError(call, platform.ErrNotFound("workspace")), nil
+		}
+		var args map[string]any
+		if err := strictDecode(call.Arguments, &args); err != nil {
+			return invalidArgs(call, err), nil
+		}
+		saved, err := s.skills.UpsertSkill(ctx, wsID, args)
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, saved), nil
+
 	case "canvas.apply_ops":
 		var args struct {
 			Ops []json.RawMessage `json:"ops"`
@@ -422,13 +586,37 @@ func (s *Service) ExecuteTool(ctx context.Context, canvasID, actor string, call 
 		return ToolCallResult{CallID: call.ID, Status: "ok",
 			Applied: &AppliedInfo{Ops: res.Applied, Version: res.Version}, Inverse: inverse, Result: result}, nil
 
-	case "assets.search", "prompts.search", "runs.list", "runs.get":
-		// 这些工具由 API 层注入具体实现（避免 agent 包依赖 asset/prompt/exec）。
-		return ToolCallResult{CallID: call.ID, Status: "ok", Result: json.RawMessage(`{"note":"delegated to api layer"}`)}, nil
-
 	case "canvas.run_generation":
-		// 触发运行由 API 层负责（agent 不依赖 exec，保持依赖单向）。
-		return ToolCallResult{CallID: call.ID, Status: "ok", Result: json.RawMessage(`{"note":"delegated to api layer"}`)}, nil
+		// 上一轮这里返回 ok 但什么都没做——用户看到「Agent 说已触发」而画布毫无变化，
+		// 这是最难排查的一类问题（谎报成功）。现在改成：
+		//   - 未注入 RunTrigger → 明确的 not_implemented（不是静默成功）；
+		//   - 已注入 → 真正触发并回传 runId，前端可据此订阅进度。
+		if s.runs == nil {
+			return notWired(call, "canvas.run_generation"), nil
+		}
+		var args struct {
+			NodeIDs []string `json:"nodeIds"`
+		}
+		if err := strictDecode(call.Arguments, &args); err != nil || len(args.NodeIDs) == 0 {
+			return invalidArgs(call, errors.New("nodeIds is required")), nil
+		}
+		// 校验目标节点存在：否则运行会以「编译失败」告终，而错误发生在异步阶段，
+		// 用户看到的是「点了没反应」。
+		doc, err := s.canvas.Get(ctx, canvasID)
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		for _, id := range args.NodeIDs {
+			if _, ok := doc.Nodes[id]; !ok {
+				return ToolCallResult{CallID: call.ID, Status: "error", Error: &ToolError{
+					Code: platform.CodeNotFound, Message: "节点不存在: " + id}}, nil
+			}
+		}
+		runID, err := s.runs.TriggerRun(ctx, canvasID, args.NodeIDs, actor)
+		if err != nil {
+			return toolError(call, err), nil
+		}
+		return toolOK(call, map[string]any{"runId": runID, "nodeIds": args.NodeIDs}), nil
 	}
 	return ToolCallResult{CallID: call.ID, Status: "error",
 		Error: &ToolError{Code: "unknown_tool", Message: call.Name}}, nil

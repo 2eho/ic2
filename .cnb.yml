@@ -36,6 +36,9 @@
     script: |
       set -euo pipefail
       make test-go
+      # 本机桥接器：事件归一化 + 安全边界（Origin 白名单 / 令牌比较）
+      make test-agent
+      make agent-check
       # 对抗用例是发版门禁（docs/design/13 §3.2）：缺一条即失败
       make adversary
 

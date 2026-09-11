@@ -5,12 +5,12 @@ import type { RawNode } from "../kernel/types";
 import { useWorkspace } from "@/shared/session/workspace";
 import { Modal } from "./dialogs/shared";
 import { InfoDialog } from "./dialogs/info";
+import { CropDialog, SplitDialog, UpscaleDialog } from "./dialogs/transform";
 import {
-  CropDialog,
-  SplitDialog,
-  UpscaleDialog,
-} from "./dialogs/transform";
-import { AngleDialog, MaskDialog, ReversePromptDialog } from "./dialogs/generative";
+  AngleDialog,
+  MaskDialog,
+  ReversePromptDialog,
+} from "./dialogs/generative";
 import { VideoFrameDialog } from "./dialogs/media";
 import type { TFn } from "@/app/App";
 
