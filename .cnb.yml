@@ -1,46 +1,89 @@
-# IC 重写 · CI 与上游巡检
-# 设计说明：docs/design/12-legacy-and-upstream.md、docs/design/13-verification-and-iteration.md
+# IC 重写 · CI 门禁与上游巡检
+#
+# 设计说明：docs/design/13-verification-and-iteration.md §3（L2 实现核验）、
+#          docs/design/12-legacy-and-upstream.md §3（上游契约面探针）
+#
+# 三条纪律（上一轮踩过的坑，写在这里防止复发）：
+#   1. 分支下的键必须是**事件名**（push / pull_request / crontab: …）；
+#      裸 "**" 不是事件名（上一轮因此整条 gate 未生效）。
+#   2. 门禁只调用 `make <target>`，不在 YAML 里重写命令——
+#      YAML 与 Makefile 各写一份必然漂移（上一轮 make sec 的用例名就已失效）。
+#   3. 不允许 `|| true` 兜住真门禁：那等于把红变绿。只有「上游巡检」这类
+#      允许失败的任务才显式 || true，并说明理由。
 
-# 门禁流水线的 stages 定义（YAML 锚点，push / pull_request 共用同一份，避免两处漂移）
+# 门禁步骤（YAML 锚点，push / pull_request 共用同一份，避免两处漂移）
 .gate-stages: &gate-stages
-        - name: 静态检查
-          script: |
-            set -euo pipefail
-            go vet ./...
-            gofmt -l . | tee /tmp/fmt.txt
-            test ! -s /tmp/fmt.txt || (echo "以下文件未格式化：" && cat /tmp/fmt.txt && exit 1)
+  - name: 工具链就绪
+    script: |
+      set -euo pipefail
+      go version
+      node -v
+      make preflight
 
-        - name: 单元测试与对抗用例
-          script: |
-            set -euo pipefail
-            go test ./... -count=1 -timeout 300s
+  - name: 契约与格式
+    script: |
+      set -euo pipefail
+      # 契约先行：生成物必须已提交（改契约不改代码 / 改代码不改契约都会红）
+      make gen-check
+      make fmt-check
 
-        - name: 边界常量一致性
-          script: node scripts/check-boundaries.mjs
+  - name: 静态检查与架构约束
+    script: |
+      set -euo pipefail
+      make lint
 
-        - name: 节点 schema 前后端一致性
-          script: node scripts/check-node-schema.mjs
+  - name: 单元测试与对抗用例
+    script: |
+      set -euo pipefail
+      make test-go
+      # 对抗用例是发版门禁（docs/design/13 §3.2）：缺一条即失败
+      make adversary
 
-        - name: 对等矩阵覆盖率报告
-          script: node scripts/parity-report.mjs
+  - name: 安全门禁
+    script: |
+      set -euo pipefail
+      # 凭据脱敏 / SSRF / 插件权限 / 资产隔离 / 上游幂等
+      make sec
 
-        - name: 安全门禁
-          script: |
-            set -euo pipefail
-            go test ./internal/platform/ -run 'TestRedact|TestSSRF|TestDrill' -count=1
-            go test ./internal/plugin/ -run 'TestATK09|TestSandbox|TestNetwork|TestInstallRejectsPermission' -count=1
-            go test ./internal/asset/ -run 'TestATK05|TestUploadSanitizes|TestCrossWorkspace' -count=1
-            node scripts/check-secrets.mjs
+  - name: 故障演练子集
+    script: |
+      set -euo pipefail
+      # 时钟回拨 / 配置非法 / DB 不可用 / 冲突 / 恢复 / 工作区删除
+      make drill
 
-        - name: 故障演练子集
-          script: |
-            set -euo pipefail
-            go test ./internal/graph/ -run 'TestVersionConflict|TestRebaseable|TestATK21' -count=1
-            go test ./internal/exec/ -run 'TestATK15|TestResume|TestCancel|TestPartialFailure' -count=1
-            go test ./internal/asset/ -run 'TestGC' -count=1
+  - name: 对等矩阵覆盖率
+    script: |
+      set -euo pipefail
+      # 报告 + 门槛校验：M7 发版要求 100%（剩余项要么 done 要么显式 dropped）
+      make parity
+
+# 前端门禁（需要 node 环境，与 Go 门禁分开跑以便并行）
+.web-stages: &web-stages
+  - name: 安装依赖
+    script: |
+      set -euo pipefail
+      cd web && npm install --no-audit --no-fund
+
+  - name: 类型检查
+    script: |
+      set -euo pipefail
+      cd web && npm run lint
+
+  - name: 前端单测
+    script: |
+      set -euo pipefail
+      cd web && npm test
+
+  - name: 生产构建与性能预算
+    script: |
+      set -euo pipefail
+      cd web && npm run build
+      # 产物体积按 gzip 衡量（首屏体积是「打开画布 < 1.5s」的最强相关因子）
+      make perf
 
 main:
-  # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）
+  # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）。
+  # 巡检失败不阻断：它只产出报告，是否跟进由人/评审决定。
   "crontab: 0 3 * * 1":
     - name: upstream-watch
       docker:
@@ -70,21 +113,27 @@ main:
               }
             "
 
-  # PR / 推送门禁：lint → test → 边界/对等/安全 → 故障演练
-  # 注意：分支下的键必须是「事件名」；裸 "**" 不是事件名，会整条流水线不生效。
-  # 用 push + pull_request 覆盖 PR 与推送两种触发；"**" 只作为分支通配。
+  # 推送门禁（分支通配 "**" 只能出现在事件之下，不能作为事件名）
   push:
     - name: gate
       docker:
         image: golang:1.24
       stages: *gate-stages
+    - name: web-gate
+      docker:
+        image: node:22
+      stages: *web-stages
 
-  # 同上：PR 事件走同一套门禁（源分支 push 与 PR 创建/重开都会触发）
+  # PR 门禁：与推送走完全相同的步骤（同一份锚点）
   pull_request:
     - name: gate
       docker:
         image: golang:1.24
       stages: *gate-stages
+    - name: web-gate
+      docker:
+        image: node:22
+      stages: *web-stages
 
 $:
   # 手动触发：按需巡检上游
@@ -102,23 +151,9 @@ $:
             bash scripts/upstream-sync.sh || true
             test -f upstream/change-report.json && cat upstream/change-report.json || echo "上游未变化"
 
-  # 手动触发：前端构建与检查（需要 node 环境）
+  # 手动触发：仅前端（Go 侧不变时加速反馈）
   web_trigger_frontend:
     - name: frontend-check
       docker:
         image: node:22
-      stages:
-        - name: 安装依赖
-          script: |
-            set -euo pipefail
-            cd web && corepack enable && (pnpm install --frozen-lockfile || pnpm install)
-        - name: 类型检查与单测
-          script: |
-            set -euo pipefail
-            cd web && pnpm exec tsc --noEmit && pnpm exec vitest run
-        - name: 生产构建
-          script: |
-            set -euo pipefail
-            cd web && pnpm build
-        - name: 内核纯度检查
-          script: node scripts/check-kernel-purity.mjs
+      stages: *web-stages

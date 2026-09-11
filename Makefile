@@ -90,8 +90,9 @@ vet: ## go vet
 	$(GO) vet ./...
 
 .PHONY: lint
-lint: ## 静态检查：vet + 架构约束 + 前端 tsc
+lint: ## 静态检查：vet + 架构约束 + CI 配置 + 前端 tsc
 	$(GO) vet ./...
+	node scripts/check-cnb-config.mjs
 	node scripts/check-kernel-purity.mjs
 	node scripts/check-node-schema.mjs
 	node scripts/check-boundaries.mjs
