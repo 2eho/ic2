@@ -7,7 +7,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, extname, relative } from 'node:path';
 
 const ROOT = '.';
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'upstream', 'bin', 'data', 'coverage']);
+// research/ 与 upstream/ 都是「不入库的上游分析镜像」（见 .gitignore）：
+// 把它们纳入检查会产生大量假阳性（上游代码本身就含上游标识），
+// 而它们的存在意义恰恰是「读原实现，不引用原代码」。
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'upstream', 'research', 'bin', 'data', 'coverage', 'playwright-report', 'test-results']);
 const SRC_EXT = new Set(['.go', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.css', '.html', '.yaml', '.yml', '.json', '.sh', '.sql', '.md']);
 // 允许出现上游引用的位置（许可与致谢、设计文档）
 const ALLOW_UPSTREAM = [/^LICENSE$/, /^NOTICE$/, /^README\.md$/, /^docs\//, /^scripts\//, /^\.cnb\.yml$/, /^Makefile$/];

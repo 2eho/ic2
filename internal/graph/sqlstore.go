@@ -280,3 +280,22 @@ func isUniqueViolation(err error) bool {
 func containsFold(s, sub string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }
+
+// WorkspaceOf 反查画布所属工作区（canvas → project → workspace）。
+//
+// 授权必须基于服务端解析出的归属，而不是客户端传入的 workspaceId：
+// 否则攻击者只要在请求里换一个「自己有权的工作区 id」就能绕过校验（INV-10）。
+func (s *SQLStore) WorkspaceOf(ctx context.Context, canvasID string) (string, error) {
+	var wsID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT p.workspace_id
+		FROM canvases c JOIN projects p ON p.id = c.project_id
+		WHERE c.id = ? AND c.deleted_at IS NULL`, canvasID).Scan(&wsID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", platform.ErrNotFound("canvas")
+		}
+		return "", platform.AsError(err)
+	}
+	return wsID, nil
+}

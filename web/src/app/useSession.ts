@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api, ApiFailure, setTokenProvider, type Session } from '@/shared/api';
-import { getStoredToken, setStoredToken } from './session';
+import { useCallback, useEffect, useState } from "react";
+import { api, ApiFailure, setTokenProvider, type Session } from "@/shared/api";
+import { getStoredToken, setStoredToken } from "./session";
 
 export interface SessionState {
   session: Session | null;
@@ -34,7 +34,7 @@ export function useSession(): SessionState {
           token,
           user: me.user,
           workspaces: me.workspaces,
-          expiresAt: '',
+          expiresAt: "",
         });
       })
       .catch(() => {
@@ -52,23 +52,26 @@ export function useSession(): SessionState {
       setTokenProvider(() => s.token);
       setSession(s);
     } catch (e) {
-      setError(e instanceof ApiFailure ? e.code : 'unknown');
+      setError(e instanceof ApiFailure ? e.code : "unknown");
       throw e;
     }
   }, []);
 
-  const register = useCallback(async (email: string, name: string, password: string) => {
-    setError(null);
-    try {
-      const s = await api.register(email, name, password);
-      setStoredToken(s.token);
-      setTokenProvider(() => s.token);
-      setSession(s);
-    } catch (e) {
-      setError(e instanceof ApiFailure ? e.code : 'unknown');
-      throw e;
-    }
-  }, []);
+  const register = useCallback(
+    async (email: string, name: string, password: string) => {
+      setError(null);
+      try {
+        const s = await api.register(email, name, password);
+        setStoredToken(s.token);
+        setTokenProvider(() => s.token);
+        setSession(s);
+      } catch (e) {
+        setError(e instanceof ApiFailure ? e.code : "unknown");
+        throw e;
+      }
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     try {

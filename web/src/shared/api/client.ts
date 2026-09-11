@@ -18,7 +18,7 @@ export class ApiFailure extends Error {
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.message);
-    this.name = 'ApiFailure';
+    this.name = "ApiFailure";
     this.status = status;
     this.code = body.code;
     this.details = body.details;
@@ -34,33 +34,36 @@ export function setTokenProvider(fn: () => string | null): void {
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
   idempotencyKey?: string;
   formData?: FormData;
 }
 
-export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  opts: RequestOptions = {},
+): Promise<T> {
   const headers: Record<string, string> = {};
   const token = tokenProvider();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
   let body: BodyInit | undefined;
   if (opts.formData) {
     body = opts.formData;
   } else if (opts.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
+    headers["Content-Type"] = "application/json";
     body = JSON.stringify(opts.body);
   }
 
   const res = await fetch(path, {
-    method: opts.method ?? (body ? 'POST' : 'GET'),
+    method: opts.method ?? (body ? "POST" : "GET"),
     headers,
     body,
     signal: opts.signal,
-    credentials: 'same-origin',
+    credentials: "same-origin",
   });
 
   if (res.status === 204) return undefined as T;
@@ -71,10 +74,10 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (!res.ok) {
     const err = (parsed ?? {}) as Partial<ApiErrorBody>;
     throw new ApiFailure(res.status, {
-      code: err.code ?? 'unknown',
+      code: err.code ?? "unknown",
       message: err.message ?? `HTTP ${res.status}`,
       details: err.details,
-      traceId: err.traceId ?? res.headers.get('X-Trace-Id') ?? undefined,
+      traceId: err.traceId ?? res.headers.get("X-Trace-Id") ?? undefined,
     });
   }
   return parsed as T;
@@ -96,6 +99,7 @@ export function isRetryable(err: unknown): boolean {
 
 /** 生成幂等键（同一用户操作重试时复用，避免重复扣费，INV-2/INV-3）。 */
 export function newIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto)
+    return crypto.randomUUID();
   return `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

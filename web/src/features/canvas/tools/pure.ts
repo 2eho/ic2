@@ -28,7 +28,10 @@ export const SPLIT_CELLS_MAX = 200;
 export const UPSCALE_EDGE_MAX = 4096;
 
 /** 生成裁剪区域（把 UI 的缩放/平移换算回原图像素）。 */
-export function cropRect(spec: CropSpec, natural: { w: number; h: number }): CropSpec {
+export function cropRect(
+  spec: CropSpec,
+  natural: { w: number; h: number },
+): CropSpec {
   const x = clamp(Math.round(spec.x), 0, Math.max(0, natural.w - 1));
   const y = clamp(Math.round(spec.y), 0, Math.max(0, natural.h - 1));
   const w = clamp(Math.round(spec.w), 1, natural.w - x);
@@ -40,11 +43,16 @@ export function cropRect(spec: CropSpec, natural: { w: number; h: number }): Cro
  * 计算切图网格。
  * 返回每个单元格的像素矩形，顺序为从左到右、从上到下（对齐原项目排布）。
  */
-export function splitGrid(spec: SplitSpec, natural: { w: number; h: number }): CropSpec[] {
+export function splitGrid(
+  spec: SplitSpec,
+  natural: { w: number; h: number },
+): CropSpec[] {
   const rows = clampInt(spec.rows, 1, SPLIT_ROWS_MAX);
   const cols = clampInt(spec.cols, 1, SPLIT_ROWS_MAX);
   if (rows * cols > SPLIT_CELLS_MAX) {
-    throw new Error(`split would create ${rows * cols} cells, limit is ${SPLIT_CELLS_MAX}`);
+    throw new Error(
+      `split would create ${rows * cols} cells, limit is ${SPLIT_CELLS_MAX}`,
+    );
   }
   const rowEdges = edgesFrom(rows, spec.rowCuts, natural.h);
   const colEdges = edgesFrom(cols, spec.colCuts, natural.w);
@@ -62,7 +70,11 @@ export function splitGrid(spec: SplitSpec, natural: { w: number; h: number }): C
   return out;
 }
 
-function edgesFrom(count: number, cuts: number[] | undefined, total: number): number[] {
+function edgesFrom(
+  count: number,
+  cuts: number[] | undefined,
+  total: number,
+): number[] {
   const edges: number[] = [0];
   if (cuts && cuts.length > 0) {
     const sorted = [...cuts].map((c) => clamp(c, 0, 1)).sort((a, b) => a - b);
@@ -95,7 +107,7 @@ export function upscaleTarget(
   return { w, h, capped: desired >= maxEdge };
 }
 
-export type UpscaleAlgorithm = 'nearest' | 'bilinear' | 'highQuality';
+export type UpscaleAlgorithm = "nearest" | "bilinear" | "highQuality";
 
 /**
  * 单像素采样（纯函数，便于单测三种算法的差异）。
@@ -109,7 +121,7 @@ export function samplePixel(
   y: number,
   algorithm: UpscaleAlgorithm,
 ): [number, number, number, number] {
-  if (algorithm === 'nearest') {
+  if (algorithm === "nearest") {
     const sx = clamp(Math.floor(x), 0, srcW - 1);
     const sy = clamp(Math.floor(y), 0, srcH - 1);
     return readPixel(src, srcW, sx, sy);
@@ -134,7 +146,12 @@ export function samplePixel(
   return out;
 }
 
-function readPixel(src: Uint8ClampedArray, srcW: number, x: number, y: number): [number, number, number, number] {
+function readPixel(
+  src: Uint8ClampedArray,
+  srcW: number,
+  x: number,
+  y: number,
+): [number, number, number, number] {
   const i = (y * srcW + x) * 4;
   return [src[i], src[i + 1], src[i + 2], src[i + 3]];
 }
@@ -152,17 +169,29 @@ function clampInt(v: number, min: number, max: number): number {
  * 反推提示词节点的文案（对齐原项目 createImageReversePromptNodes 的三节点布局）。
  * 返回「文本节点」「生成配置节点」的内容与相对位置。
  */
-export function reversePromptPlan(nodeRect: { x: number; y: number; w: number; h: number }) {
+export function reversePromptPlan(nodeRect: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}) {
   return {
     textNode: {
-      title: '反推提示词',
-      spec: { text: '请描述这张图片的画面内容、风格、构图与光线，输出一段可直接用于生图的提示词。' },
+      title: "反推提示词",
+      spec: {
+        text: "请描述这张图片的画面内容、风格、构图与光线，输出一段可直接用于生图的提示词。",
+      },
       rect: { x: nodeRect.x + nodeRect.w + 80, y: nodeRect.y, w: 320, h: 220 },
     },
     configNode: {
-      title: '生成',
-      spec: { capability: 'image.edit', outputCount: 1 },
-      rect: { x: nodeRect.x + nodeRect.w + 80, y: nodeRect.y + 260, w: 340, h: 260 },
+      title: "生成",
+      spec: { capability: "image.edit", outputCount: 1 },
+      rect: {
+        x: nodeRect.x + nodeRect.w + 80,
+        y: nodeRect.y + 260,
+        w: 340,
+        h: 260,
+      },
     },
   };
 }
@@ -182,17 +211,27 @@ export function buildAnglePrompt(spec: AngleSpec): string {
   const h = clamp(Math.round(spec.horizontal), -90, 90);
   const p = clamp(Math.round(spec.pitch), -90, 90);
   const d = clamp(spec.distance, 0, 2);
-  const parts: string[] = ['保持主体不变，改变观察视角：'];
-  if (h !== 0) parts.push(`水平旋转 ${h > 0 ? '向右' : '向左'} ${Math.abs(h)} 度`);
-  if (p !== 0) parts.push(`俯仰 ${p > 0 ? '向上' : '向下'} ${Math.abs(p)} 度`);
-  if (d !== 1) parts.push(d > 1 ? `镜头拉远至 ${d.toFixed(1)} 倍距离` : `镜头拉近至 ${d.toFixed(1)} 倍距离`);
-  if (spec.wideAngle) parts.push('使用广角镜头效果');
-  if (parts.length === 1) parts.push('保持原视角');
-  return parts.join('；') + '。';
+  const parts: string[] = ["保持主体不变，改变观察视角："];
+  if (h !== 0)
+    parts.push(`水平旋转 ${h > 0 ? "向右" : "向左"} ${Math.abs(h)} 度`);
+  if (p !== 0) parts.push(`俯仰 ${p > 0 ? "向上" : "向下"} ${Math.abs(p)} 度`);
+  if (d !== 1)
+    parts.push(
+      d > 1
+        ? `镜头拉远至 ${d.toFixed(1)} 倍距离`
+        : `镜头拉近至 ${d.toFixed(1)} 倍距离`,
+    );
+  if (spec.wideAngle) parts.push("使用广角镜头效果");
+  if (parts.length === 1) parts.push("保持原视角");
+  return parts.join("；") + "。";
 }
 
 /** 蒙版导出：把画布上的遮罩转成黑白标注图（白=需要重绘区域）。 */
-export function maskToImageData(mask: Uint8ClampedArray, w: number, h: number): Uint8ClampedArray {
+export function maskToImageData(
+  mask: Uint8ClampedArray,
+  w: number,
+  h: number,
+): Uint8ClampedArray {
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = mask[i * 4 + 3];
@@ -206,12 +245,16 @@ export function maskToImageData(mask: Uint8ClampedArray, w: number, h: number): 
 }
 
 /** 视频截帧时间点（首帧/尾帧/当前帧），避免 0 与 duration 越界。 */
-export function frameTime(kind: 'first' | 'last' | 'current', durationSec: number, currentSec: number): number {
+export function frameTime(
+  kind: "first" | "last" | "current",
+  durationSec: number,
+  currentSec: number,
+): number {
   const d = Math.max(0, durationSec);
   switch (kind) {
-    case 'first':
+    case "first":
       return 0;
-    case 'last':
+    case "last":
       return Math.max(0, d - 0.04); // 尾帧留一点余量，避免取不到
     default:
       return clamp(currentSec, 0, Math.max(0, d - 0.04));

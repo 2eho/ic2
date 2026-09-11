@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://context-flow.cloud/ic/contracts/ops.schema.json",
+  "title": "CanvasOp",
+  "description": "画布写操作的判别联合。真源是 internal/graph/op.go，本文件是契约镜像；一致性由 make gen 校验。未知字段一律拒绝（additionalProperties:false），避免出现「前端多发字段被静默忽略」。",
+  "type": "object",
+  "required": ["kind"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "add_node",
+        "remove_node",
+        "move_node",
+        "resize_node",
+        "set_title",
+        "set_spec",
+        "set_state",
+        "add_edge",
+        "remove_edge",
+        "group",
+        "ungroup",
+        "set_viewport",
+        "set_settings",
+        "set_parent"
+      ]
+    },
+    "id": { "type": "string", "description": "目标节点或连线 id" },
+    "node": { "type": "object", "description": "add_node 的节点快照" },
+    "parentId": { "type": "string", "description": "group / set_parent 的父节点 id，空串表示移出组" },
+    "nodeIds": { "type": "array", "items": { "type": "string" }, "description": "group / ungroup / remove_node 的目标集合" },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number", "minimum": -10000000, "maximum": 10000000 },
+        "y": { "type": "number", "minimum": -10000000, "maximum": 10000000 },
+        "w": { "type": "number", "minimum": 16, "maximum": 20000 },
+        "h": { "type": "number", "minimum": 16, "maximum": 20000 }
+      }
+    },
+    "title": { "type": "string", "maxLength": 200 },
+    "spec": { "type": "object", "description": "节点配置，按节点类型 schema 校验" },
+    "state": { "type": "object", "description": "节点运行状态（status/result/error）" },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "object" },
+        "to": { "type": "object" },
+        "kind": { "type": "string" }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "k": { "type": "number", "minimum": 0.05, "maximum": 5 }
+      }
+    },
+    "settings": { "type": "object", "description": "画布设置（背景/图片信息等）" }
+  }
+}

@@ -24,7 +24,7 @@ func (a *Adapter) openStream(ctx context.Context, cred provider.Credential, req 
 	if err != nil {
 		return nil, platform.AsError(err)
 	}
-	headers := provider.AuthHeaders(cred)
+	headers := provider.RequestHeaders(cred, "openai", req.RequestID)
 	headers["Accept"] = "text/event-stream"
 	rc, _, err := a.transport.DoRawWithBody(ctx, http.MethodPost,
 		provider.TrimBaseURL(cred.BaseURL)+"/v1/responses", headers, payload)

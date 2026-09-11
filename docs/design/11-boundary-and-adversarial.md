@@ -170,27 +170,27 @@
 | ID | 对抗动作 | 期望 | 用例位置 |
 | --- | --- | --- | --- |
 | ATK-01 | 提交 `x: NaN` 的 add_node | 422，`code=invalid_geometry` | `internal/graph/op_test.go` |
-| ATK-02 | 同一 Idempotency-Key 连发 10 次 Run | 只创建 1 个 Run | `internal/exec/idempotency_test.go` |
-| ATK-03 | Provider 超时但上游已扣费，客户端重试 | 命中 `request_id` 唯一约束，上游只调用 1 次 | `internal/provider/transport_test.go` |
-| ATK-04 | Base URL = `http://169.254.169.254` | 拒绝，`code=ssrf_blocked` | `internal/platform/http_test.go` |
-| ATK-05 | 上传文件名为 `../../x.png` | Blob 路径为 hash，无穿越 | `internal/asset/store_test.go` |
-| ATK-06 | 日志中打入 `Authorization: Bearer sk-x` | 日志中为 `***` | `internal/platform/redact_test.go` |
-| ATK-07 | viewer 提交 op | 403 | `internal/api/middleware_test.go` |
-| ATK-08 | 用他人 workspace 的 canvasId 读取 | 404（不泄露存在性） | `internal/api/graph_test.go` |
-| ATK-09 | 插件调用未声明能力 `asset.read` | 拒绝并审计 | `internal/plugin/capability_test.go` |
+| ATK-02 | 同一 Idempotency-Key 连发 10 次 Run | 只创建 1 个 Run，且返回同一个 Run | `internal/exec/engine_test.go`、`internal/exec/sqlstore_test.go` |
+| ATK-03 | Provider 超时但上游已扣费，客户端重试 | 重试携带同一 request_id（幂等头）；`run_attempts.request_id` 唯一 | `internal/provider/idempotency_test.go`、`internal/exec/sqlstore_test.go` |
+| ATK-04 | Base URL = `http://169.254.169.254` | 拒绝，`code=ssrf_blocked` | `internal/platform/netguard_test.go` |
+| ATK-05 | 上传文件名为 `../../x.png` | Blob 路径为 hash，无穿越 | `internal/asset/service_test.go` |
+| ATK-06 | 日志中打入 `Authorization: Bearer sk-x` | 日志中为 `***`，原文一字不剩 | `internal/platform/redact_test.go` |
+| ATK-07 | viewer 提交 op | 403（editor 可写，证明是按角色而非一律拒绝） | `internal/api/adversary_test.go` |
+| ATK-08 | 用他人 workspace 的 canvasId 读取 | 404（不泄露存在性） | `internal/api/adversary_test.go` |
+| ATK-09 | 插件调用未声明能力 `asset.read` | 拒绝并审计 | `internal/plugin/manifest_test.go` |
 | ATK-10 | 插件尝试 `parent.document.cookie` | 抛异常（null origin） | `web/e2e/plugin-sandbox.spec.ts` |
 | ATK-11 | 两客户端同时改同一节点 spec | 一方 409 并拿到权威文档 | `web/e2e/conflict.spec.ts` |
 | ATK-12 | 断网 30s 内编辑 20 个节点后恢复 | 无丢无重，最终一致 | `web/e2e/offline.spec.ts` |
-| ATK-13 | Agent 实时事件 + 历史快照同时到达 | `agent_items` 无重复 | `internal/agent/merge_test.go` |
-| ATK-14 | 重放同 `callId` 的工具调用 | 只执行一次 | `internal/agent/tool_gateway_test.go` |
+| ATK-13 | Agent 实时事件 + 历史快照同时到达 | `agent_items` 无重复 | `internal/agent/agent_test.go` |
+| ATK-14 | 重放同 `callId` 的工具调用 | 只执行一次 | `internal/agent/agent_test.go` |
 | ATK-15 | 视频任务运行中 kill 服务端再启动 | 任务继续轮询并完成 | `internal/exec/resume_test.go` |
-| ATK-16 | GC 运行期间上传被引用的新资产 | 资产未被删 | `internal/asset/gc_test.go` |
-| ATK-17 | 日限额边界：跨时区跨日 | 不重复、不跳过 | `internal/exec/quota_test.go` |
+| ATK-16 | GC 运行期间上传被引用的新资产 | 资产未被删 | `internal/asset/service_test.go` |
+| ATK-17 | 日限额边界：跨时区跨日（含 DST 切换日） | 窗口按工作区时区取本地零点，不重复不跳过 | `internal/exec/quota_test.go` |
 | ATK-18 | 5000 节点视口操作 | ≥55 FPS | `web/e2e/perf.spec.ts` |
 | ATK-19 | 恶意 SVG 节点 | `<script>` 不执行 | `web/e2e/svg-sanitize.spec.ts` |
-| ATK-20 | 1MB 提示词 | 422 且不产生上游调用 | `internal/api/exec_test.go` |
+| ATK-20 | 1MB 提示词 | 422，且**不创建 Run、不产生上游调用** | `internal/api/adversary_test.go` |
 | ATK-21 | 画布 op 日志重放与快照比对 | 完全一致（INV-1） | `internal/graph/replay_test.go` |
-| ATK-22 | 删除工作区后用旧 ID 访问 | 404 且 Blob 已清（冷静期后） | `internal/identity/delete_test.go` |
+| ATK-22 | 删除工作区后用旧 ID 访问 | 立即 404；7 天冷静期后可恢复；到期进入清理候选 | `internal/identity/delete_test.go` |
 
 > 红队不是一次性的：每引入一个新的外部依赖/新协议/新存储，**必须补一条对抗用例**。
 > PR 模板中有「本次改动新增了哪些边界？补了哪条对抗用例？」必填项。

@@ -1,11 +1,11 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter } from 'react-router-dom';
-import { App } from './App';
-import { setTokenProvider } from '@/shared/api';
-import { getStoredToken } from './session';
-import './styles.css';
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter } from "react-router-dom";
+import { App } from "./App";
+import { setTokenProvider } from "@/shared/api";
+import { getStoredToken } from "./session";
+import "./styles.css";
 
 // token 只存内存 + sessionStorage（不落 localStorage，降低 XSS 影响面）
 setTokenProvider(getStoredToken);
@@ -24,8 +24,8 @@ const queryClient = new QueryClient({
   },
 });
 
-const root = document.getElementById('root');
-if (!root) throw new Error('#root not found');
+const root = document.getElementById("root");
+if (!root) throw new Error("#root not found");
 
 createRoot(root).render(
   <StrictMode>

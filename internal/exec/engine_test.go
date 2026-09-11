@@ -228,6 +228,10 @@ func TestRunSucceedsAndWritesBack(t *testing.T) {
 }
 
 // ATK-02：同一 Idempotency-Key 连发 10 次 Run，只创建 1 个。
+// ATK-02：同一 Idempotency-Key 连发 10 次 Run，只创建 1 个。
+//
+// 判据必须包含「返回的是同一个 Run」而不只是「只有一条记录」：
+// 若第二次请求拿到一个新 Run，用户会看到重复运行，等于幂等失效。
 func TestATK02IdempotentRunCreation(t *testing.T) {
 	adapter := &fakeAdapter{id: "openai"}
 	e, _, _, _ := engineWith(adapter, provider.Pricing{})

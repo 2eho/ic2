@@ -1,4 +1,4 @@
-import type { Op, RawEdge, RawNode, Viewport } from './types';
+import type { Op, RawEdge, RawNode, Viewport } from "./types";
 
 /** 一条可撤销记录：正向 op 与其反向 op，以及恢复所需的节点/边快照。 */
 export interface UndoEntry {
@@ -55,7 +55,12 @@ export class UndoStack {
     const last = this.stack[this.stack.length - 1];
     // 合并条件：同一手势 + 同类 op + 在时间窗内。刻意要求 gesture 非空，
     // 否则两次独立点击也会被合并成一步（不可接受的撤销粒度）。
-    if (this.gesture && last && entry.at - last.at < UndoStack.MERGE_WINDOW_MS && canMerge(last, entry)) {
+    if (
+      this.gesture &&
+      last &&
+      entry.at - last.at < UndoStack.MERGE_WINDOW_MS &&
+      canMerge(last, entry)
+    ) {
       last.ops = mergeOps(last.ops, entry.ops);
       last.inverse = entry.inverse;
       last.at = entry.at;
@@ -91,7 +96,7 @@ export class UndoStack {
 
 function canMerge(a: UndoEntry, b: UndoEntry): boolean {
   if (a.label !== b.label) return false;
-  const kindOf = (ops: Op[]) => ops.map((o) => o.kind).join(',');
+  const kindOf = (ops: Op[]) => ops.map((o) => o.kind).join(",");
   const mergeable = /^(move_node|resize_node|set_viewport)(,)?$/;
   if (!mergeable.test(kindOf(a.ops))) return false;
   return kindOf(a.ops) === kindOf(b.ops);
@@ -99,7 +104,7 @@ function canMerge(a: UndoEntry, b: UndoEntry): boolean {
 
 function mergeOps(a: Op[], b: Op[]): Op[] {
   const out = new Map<string, Op>();
-  for (const op of a) out.set(op.kind + ':' + ('id' in op ? op.id : ''), op);
-  for (const op of b) out.set(op.kind + ':' + ('id' in op ? op.id : ''), op);
+  for (const op of a) out.set(op.kind + ":" + ("id" in op ? op.id : ""), op);
+  for (const op of b) out.set(op.kind + ":" + ("id" in op ? op.id : ""), op);
   return [...out.values()];
 }

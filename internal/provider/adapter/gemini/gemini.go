@@ -129,7 +129,7 @@ func (a *Adapter) generateImages(ctx context.Context, cred provider.Credential, 
 		},
 	}
 	var out genResp
-	if err := a.callGen(ctx, cred, req.Model, "generateContent", body, &out); err != nil {
+	if err := a.callGen(ctx, cred, req.Model, "generateContent", req.RequestID, body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	return parseGenResp(out)
@@ -143,7 +143,7 @@ func (a *Adapter) text(ctx context.Context, cred provider.Credential, req provid
 		},
 	}
 	var out genResp
-	if err := a.callGen(ctx, cred, req.Model, "generateContent", body, &out); err != nil {
+	if err := a.callGen(ctx, cred, req.Model, "generateContent", req.RequestID, body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	return parseGenResp(out)
@@ -158,7 +158,7 @@ func (a *Adapter) tts(ctx context.Context, cred provider.Credential, req provide
 	cfg.SpeechConfig = sc
 	body := genReq{Contents: []content{{Parts: buildParts(req)}}, GenerationConfig: cfg}
 	var out genResp
-	if err := a.callGen(ctx, cred, req.Model, "generateContent", body, &out); err != nil {
+	if err := a.callGen(ctx, cred, req.Model, "generateContent", req.RequestID, body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	return parseGenResp(out)
@@ -193,7 +193,7 @@ func (a *Adapter) videoCreate(ctx context.Context, cred provider.Credential, req
 		Parameters: buildVideoParams(req.Params),
 	}
 	var out longRunningResp
-	if err := a.callLong(ctx, cred, req.Model, "predictLongRunning", body, &out); err != nil {
+	if err := a.callLong(ctx, cred, req.Model, "predictLongRunning", req.RequestID, body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	if out.Error != nil {
@@ -213,7 +213,7 @@ func (a *Adapter) videoCreate(ctx context.Context, cred provider.Credential, req
 func (a *Adapter) Poll(ctx context.Context, cred provider.Credential, taskID string) (provider.RemoteTask, error) {
 	url := fmt.Sprintf("%s/v1beta/%s", provider.TrimBaseURL(cred.BaseURL), strings.TrimPrefix(taskID, "/"))
 	var out longRunningResp
-	if err := a.transport.DoJSON(ctx, "GET", url, provider.AuthHeaders(cred), nil, &out); err != nil {
+	if err := a.transport.DoJSON(ctx, "GET", url, provider.RequestHeaders(cred, "gemini", ""), nil, &out); err != nil {
 		return provider.RemoteTask{}, err
 	}
 	task := provider.RemoteTask{ID: taskID, Provider: "gemini", Status: "running", Progress: out.Metadata.ProgressPercent}
@@ -232,7 +232,7 @@ func (a *Adapter) FetchAsset(ctx context.Context, cred provider.Credential, ref 
 	if ref.URL == "" {
 		return nil, "", &provider.ProviderError{Class: provider.ClassPermanent, Code: platform.CodeInvalidRequest, Message: "asset has no url"}
 	}
-	return a.transport.DoRaw(ctx, "GET", ref.URL, provider.AuthHeaders(cred))
+	return a.transport.DoRaw(ctx, "GET", ref.URL, provider.RequestHeaders(cred, "gemini", ""))
 }
 
 type modelsResp struct {
@@ -247,7 +247,7 @@ type modelsResp struct {
 func (a *Adapter) ListModels(ctx context.Context, cred provider.Credential) ([]provider.ModelInfo, error) {
 	var out modelsResp
 	if err := a.transport.DoJSON(ctx, "GET", provider.TrimBaseURL(cred.BaseURL)+"/v1beta/models",
-		provider.AuthHeaders(cred), nil, &out); err != nil {
+		provider.RequestHeaders(cred, "gemini", ""), nil, &out); err != nil {
 		return nil, err
 	}
 	models := make([]provider.ModelInfo, 0, len(out.Models))
@@ -272,7 +272,7 @@ func (a *Adapter) Stream(ctx context.Context, cred provider.Credential, req prov
 	if err != nil {
 		return nil, platform.AsError(err)
 	}
-	headers := provider.AuthHeaders(cred)
+	headers := provider.RequestHeaders(cred, "gemini", req.RequestID)
 	headers["Accept"] = "text/event-stream"
 	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse",
 		provider.TrimBaseURL(cred.BaseURL), req.Model)
@@ -288,23 +288,23 @@ type errorEnvelope struct {
 	Error *geminiError `json:"error"`
 }
 
-func (a *Adapter) callGen(ctx context.Context, cred provider.Credential, model, method string, body any, out *genResp) error {
-	if err := a.postJSON(ctx, cred, model, method, body, out); err != nil {
+func (a *Adapter) callGen(ctx context.Context, cred provider.Credential, model, method, requestID string, body any, out *genResp) error {
+	if err := a.postJSON(ctx, cred, model, method, requestID, body, out); err != nil {
 		return err
 	}
 	return classifyEnvelope(out.Error)
 }
 
-func (a *Adapter) callLong(ctx context.Context, cred provider.Credential, model, method string, body any, out *longRunningResp) error {
-	if err := a.postJSON(ctx, cred, model, method, body, out); err != nil {
+func (a *Adapter) callLong(ctx context.Context, cred provider.Credential, model, method, requestID string, body any, out *longRunningResp) error {
+	if err := a.postJSON(ctx, cred, model, method, requestID, body, out); err != nil {
 		return err
 	}
 	return classifyEnvelope(out.Error)
 }
 
-func (a *Adapter) postJSON(ctx context.Context, cred provider.Credential, model, method string, body any, out any) error {
+func (a *Adapter) postJSON(ctx context.Context, cred provider.Credential, model, method, requestID string, body any, out any) error {
 	url := fmt.Sprintf("%s/v1beta/models/%s:%s", provider.TrimBaseURL(cred.BaseURL), model, method)
-	return a.transport.DoJSON(ctx, "POST", url, provider.AuthHeaders(cred), body, out)
+	return a.transport.DoJSON(ctx, "POST", url, provider.RequestHeaders(cred, "gemini", requestID), body, out)
 }
 
 func classifyEnvelope(e *geminiError) error {

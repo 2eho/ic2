@@ -1,5 +1,5 @@
-import type { RawEdge, RawNode, Rect, Vec2 } from './types';
-import { rectsIntersect } from './geometry';
+import type { RawEdge, RawNode, Rect, Vec2 } from "./types";
+import { rectsIntersect } from "./geometry";
 
 /**
  * 场景图：维护节点/边索引与空间分桶。
@@ -153,7 +153,7 @@ export class SceneGraph {
     const candidates = this.queryRect({ x: point.x, y: point.y, w: 1, h: 1 });
     candidates.sort((a, b) => b.z - a.z);
     for (const n of candidates) {
-      if (opts.skipGroups && n.type === 'group') continue;
+      if (opts.skipGroups && n.type === "group") continue;
       if (
         point.x >= n.rect.x &&
         point.x <= n.rect.x + n.rect.w &&
@@ -168,7 +168,9 @@ export class SceneGraph {
 
   /** 框选：返回与框相交的节点（原项目语义为交集判定） */
   hitRect(rect: Rect, opts: { skipGroups?: boolean } = {}): RawNode[] {
-    return this.queryRect(rect).filter((n) => !(opts.skipGroups && n.type === 'group'));
+    return this.queryRect(rect).filter(
+      (n) => !(opts.skipGroups && n.type === "group"),
+    );
   }
 
   /** 邻接高亮：返回与给定节点直接相连的节点与边 */

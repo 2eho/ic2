@@ -195,6 +195,32 @@ func (t *Transport) DoRaw(ctx context.Context, method, url string, headers map[s
 	return res.Body, res.Header.Get("Content-Type"), nil
 }
 
+// RequestHeaders 生成一次调用的完整请求头：鉴权 + 幂等 + 追踪。
+//
+// 统一出口的意义：幂等头如果只在某几个适配器里加，就会出现「图片生成有幂等、
+// 视频生成没有」的不一致，而视频恰好是最贵、最容易重复计费的能力（INV-3）。
+// 因此把构造收敛到这里，所有适配器调用时都会带上。
+func RequestHeaders(cred Credential, providerKind, requestID string) map[string]string {
+	h := AuthHeaders(cred)
+	header := http.Header{}
+	for k, v := range h {
+		header.Set(k, v)
+	}
+	ApplyIdempotencyHeaders(header, providerKind, requestID)
+	out := make(map[string]string, len(header))
+	for k := range header {
+		out[k] = header.Get(k)
+	}
+	return out
+}
+
+func providerKindOf(cred Credential) string {
+	if cred.AuthKind == "gemini" || cred.AuthKind == "x-goog-api-key" {
+		return "gemini"
+	}
+	return "openai"
+}
+
 // AuthHeaders 按凭据类型生成鉴权头。
 func AuthHeaders(cred Credential) map[string]string {
 	h := map[string]string{}

@@ -77,9 +77,13 @@ func (d *DB) Migrate(ctx context.Context, fsys fs.FS, dir string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			names = append(names, e.Name())
+		// 只执行上行迁移：`*.down.sql` 是回滚脚本，正常迁移路径必须跳过。
+		// 这里踩过一次真实事故：把 down 脚本一起执行会让「迁移」在跑到 down 时
+		// 把 schema_migrations 删掉，随后所有迁移记录静默丢失。
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") || strings.HasSuffix(e.Name(), ".down.sql") {
+			continue
 		}
+		names = append(names, e.Name())
 	}
 	sort.Strings(names)
 
@@ -150,4 +154,102 @@ func (d *DB) Ready(ctx context.Context) error {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return d.PingContext(cctx)
+}
+
+// AppliedMigrations 返回已应用的迁移版本（按文件名升序）。
+//
+// 备份恢复演练（docs/design/13 §4.2）需要据此核对「恢复出来的库是不是同一代 schema」，
+// 因此这个查询必须是纯读、不修改任何状态。
+func (d *DB) AppliedMigrations(ctx context.Context) ([]string, error) {
+	rows, err := d.QueryContext(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		if isMissingTable(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// MigrateDown 回滚最近 n 个迁移。
+//
+// 约定：迁移文件 `NNNN_name.sql` 对应的回滚脚本是 `NNNN_name.down.sql`。
+// 规则（刻意保守）：
+//   - 没有对应 down 文件的迁移**不允许**回滚，直接报错而不是「跳过」——
+//     静默跳过会让运维以为回滚成功；
+//   - 回滚按逆序执行，并在同一事务内完成（SQLite 支持 DDL 事务）。
+func (d *DB) MigrateDown(ctx context.Context, fsys fs.FS, dir string, n int) ([]string, error) {
+	if n <= 0 {
+		return nil, fmt.Errorf("回滚步数必须为正数，当前 %d", n)
+	}
+	applied, err := d.AppliedMigrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(applied) == 0 {
+		return nil, nil
+	}
+	join := func(name string) string {
+		if dir == "" || dir == "." {
+			return name
+		}
+		return dir + "/" + name
+	}
+	if n > len(applied) {
+		n = len(applied)
+	}
+	rolled := make([]string, 0, n)
+	for i := len(applied) - 1; i >= len(applied)-n; i-- {
+		version := applied[i]
+		downName := strings.TrimSuffix(version, ".sql") + ".down.sql"
+		body, err := fs.ReadFile(fsys, join(downName))
+		if err != nil {
+			return rolled, fmt.Errorf("迁移 %s 没有回滚脚本 %s，拒绝回滚", version, downName)
+		}
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return rolled, err
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				_ = tx.Rollback()
+				return rolled, fmt.Errorf("回滚 %s 失败: %w", version, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = ?`, version); err != nil {
+			_ = tx.Rollback()
+			return rolled, err
+		}
+		if err := tx.Commit(); err != nil {
+			return rolled, err
+		}
+		rolled = append(rolled, version)
+	}
+	return rolled, nil
+}
+
+// DBDSNPath 从 DSN 中提取文件路径（用于创建父目录与体检）。
+// 非文件型 DSN（内存库、postgres URL）返回 "."，调用方据此忽略目录创建。
+func (c Config) DBDSNPath() string {
+	dsn := c.DBDSN
+	if !strings.HasPrefix(dsn, "file:") {
+		return "."
+	}
+	path := strings.TrimPrefix(dsn, "file:")
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	if path == "" || strings.Contains(path, ":memory:") {
+		return "."
+	}
+	return path
 }

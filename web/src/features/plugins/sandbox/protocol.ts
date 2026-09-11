@@ -10,47 +10,63 @@
  */
 
 export type HostMethod =
-  | 'node.get'
-  | 'node.patch'
-  | 'node.resize'
-  | 'node.emit'
-  | 'graph.upstream'
-  | 'graph.downstream'
-  | 'graph.query'
-  | 'asset.getUrl'
-  | 'asset.upload'
-  | 'ai.generate'
-  | 'storage.get'
-  | 'storage.set'
-  | 'storage.remove'
-  | 'host.toast';
+  | "node.get"
+  | "node.patch"
+  | "node.resize"
+  | "node.emit"
+  | "graph.upstream"
+  | "graph.downstream"
+  | "graph.query"
+  | "asset.getUrl"
+  | "asset.upload"
+  | "ai.generate"
+  | "storage.get"
+  | "storage.set"
+  | "storage.remove"
+  | "host.toast";
 
 export type Permission =
-  | 'node.read'
-  | 'node.write'
-  | 'asset.read'
-  | 'asset.write'
-  | 'ai.generate'
-  | 'storage'
-  | 'network'
-  | 'graph.query';
+  | "node.read"
+  | "node.write"
+  | "asset.read"
+  | "asset.write"
+  | "ai.generate"
+  | "storage"
+  | "network"
+  | "graph.query";
 
 /** 宿主 → 插件 */
 export type HostToPlugin =
-  | { type: 'plugin:init'; node: PluginNodeSnapshot; theme: 'light' | 'dark'; width: number; height: number }
-  | { type: 'plugin:update'; patch: Record<string, unknown> }
-  | { type: 'plugin:theme'; theme: 'light' | 'dark' }
-  | { type: 'plugin:result'; id: string; ok: true; value: unknown }
-  | { type: 'plugin:result'; id: string; ok: false; error: { code: string; message: string } }
-  | { type: 'plugin:disable'; reason: string };
+  | {
+      type: "plugin:init";
+      node: PluginNodeSnapshot;
+      theme: "light" | "dark";
+      width: number;
+      height: number;
+    }
+  | { type: "plugin:update"; patch: Record<string, unknown> }
+  | { type: "plugin:theme"; theme: "light" | "dark" }
+  | { type: "plugin:result"; id: string; ok: true; value: unknown }
+  | {
+      type: "plugin:result";
+      id: string;
+      ok: false;
+      error: { code: string; message: string };
+    }
+  | { type: "plugin:disable"; reason: string };
 
 /** 插件 → 宿主 */
 export type PluginToHost =
-  | { type: 'plugin:ready' }
-  | { type: 'host:call'; id: string; method: HostMethod; params?: Record<string, unknown> }
-  | { type: 'host:event'; name: string; payload?: unknown }
-  | { type: 'plugin:resize'; width: number; height: number }
-  | { type: 'plugin:log'; level: 'info' | 'warn' | 'error'; message: string };
+  | { type: "plugin:ready" }
+  | {
+      type: "host:call";
+      id: string;
+      method: HostMethod;
+      params?: Record<string, unknown>;
+    }
+  | { type: "host:event"; name: string; payload?: unknown }
+  | { type: "plugin:resize"; width: number; height: number }
+  | { type: "plugin:log"; level: "info" | "warn" | "error"; message: string };
 
 export interface PluginNodeSnapshot {
   id: string;
@@ -62,47 +78,59 @@ export interface PluginNodeSnapshot {
 }
 
 const METHOD_PERMISSION: Record<HostMethod, Permission | null> = {
-  'node.get': 'node.read',
-  'node.patch': 'node.write',
-  'node.resize': 'node.write',
-  'node.emit': 'node.write',
-  'graph.upstream': 'node.read',
-  'graph.downstream': 'node.read',
-  'graph.query': 'graph.query',
-  'asset.getUrl': 'asset.read',
-  'asset.upload': 'asset.write',
-  'ai.generate': 'ai.generate',
-  'storage.get': 'storage',
-  'storage.set': 'storage',
-  'storage.remove': 'storage',
-  'host.toast': null,
+  "node.get": "node.read",
+  "node.patch": "node.write",
+  "node.resize": "node.write",
+  "node.emit": "node.write",
+  "graph.upstream": "node.read",
+  "graph.downstream": "node.read",
+  "graph.query": "graph.query",
+  "asset.getUrl": "asset.read",
+  "asset.upload": "asset.write",
+  "ai.generate": "ai.generate",
+  "storage.get": "storage",
+  "storage.set": "storage",
+  "storage.remove": "storage",
+  "host.toast": null,
 };
 
 /** 校验消息结构。返回 null 表示不是合法协议消息（必须丢弃，不能"尽力解析"）。 */
 export function parsePluginMessage(raw: unknown): PluginToHost | null {
-  if (typeof raw !== 'object' || raw === null) return null;
+  if (typeof raw !== "object" || raw === null) return null;
   const msg = raw as Record<string, unknown>;
   switch (msg.type) {
-    case 'plugin:ready':
-      return { type: 'plugin:ready' };
-    case 'host:call': {
-      if (typeof msg.id !== 'string' || typeof msg.method !== 'string') return null;
+    case "plugin:ready":
+      return { type: "plugin:ready" };
+    case "host:call": {
+      if (typeof msg.id !== "string" || typeof msg.method !== "string")
+        return null;
       if (!(msg.method in METHOD_PERMISSION)) return null;
-      const params = typeof msg.params === 'object' && msg.params !== null ? (msg.params as Record<string, unknown>) : undefined;
-      return { type: 'host:call', id: msg.id, method: msg.method as HostMethod, params };
+      const params =
+        typeof msg.params === "object" && msg.params !== null
+          ? (msg.params as Record<string, unknown>)
+          : undefined;
+      return {
+        type: "host:call",
+        id: msg.id,
+        method: msg.method as HostMethod,
+        params,
+      };
     }
-    case 'host:event': {
-      if (typeof msg.name !== 'string') return null;
-      return { type: 'host:event', name: msg.name, payload: msg.payload };
+    case "host:event": {
+      if (typeof msg.name !== "string") return null;
+      return { type: "host:event", name: msg.name, payload: msg.payload };
     }
-    case 'plugin:resize': {
-      if (typeof msg.width !== 'number' || typeof msg.height !== 'number') return null;
-      if (!Number.isFinite(msg.width) || !Number.isFinite(msg.height)) return null;
-      return { type: 'plugin:resize', width: msg.width, height: msg.height };
+    case "plugin:resize": {
+      if (typeof msg.width !== "number" || typeof msg.height !== "number")
+        return null;
+      if (!Number.isFinite(msg.width) || !Number.isFinite(msg.height))
+        return null;
+      return { type: "plugin:resize", width: msg.width, height: msg.height };
     }
-    case 'plugin:log': {
-      const level = msg.level === 'warn' || msg.level === 'error' ? msg.level : 'info';
-      return { type: 'plugin:log', level, message: String(msg.message ?? '') };
+    case "plugin:log": {
+      const level =
+        msg.level === "warn" || msg.level === "error" ? msg.level : "info";
+      return { type: "plugin:log", level, message: String(msg.message ?? "") };
     }
     default:
       return null;
@@ -114,22 +142,32 @@ export function requiredPermission(method: HostMethod): Permission | null {
   return METHOD_PERMISSION[method] ?? null;
 }
 
-export function hasPermission(declared: string[], need: Permission | null, arg?: string): boolean {
+export function hasPermission(
+  declared: string[],
+  need: Permission | null,
+  arg?: string,
+): boolean {
   if (need === null) return true;
-  if (need === 'ai.generate' && arg) {
-    return declared.includes(`ai.generate:${arg}`) || declared.includes('ai.generate');
+  if (need === "ai.generate" && arg) {
+    return (
+      declared.includes(`ai.generate:${arg}`) ||
+      declared.includes("ai.generate")
+    );
   }
   return declared.includes(need);
 }
 
 /** 生成 iframe 的 sandbox 属性（绝不加 allow-same-origin）。 */
 export function sandboxAttrs(): string {
-  return 'allow-scripts';
+  return "allow-scripts";
 }
 
 /** 生成插件文档的 CSP（默认无外部连接）。 */
 export function pluginCSP(allowedHosts: string[]): string {
-  const connect = allowedHosts.length > 0 ? allowedHosts.map((h) => `https://${h}`).join(' ') : "'none'";
+  const connect =
+    allowedHosts.length > 0
+      ? allowedHosts.map((h) => `https://${h}`).join(" ")
+      : "'none'";
   return `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src ${connect}`;
 }
 
@@ -137,7 +175,10 @@ export function pluginCSP(allowedHosts: string[]): string {
  * 生成 iframe 的 srcDoc：把插件 bundle 包进一个最小的、带 CSP 的 HTML 外壳。
  * 插件代码自身无法修改 CSP（iframe 的 CSP 由外层文档设置）。
  */
-export function buildSandboxDocument(bundle: string, allowedHosts: string[]): string {
+export function buildSandboxDocument(
+  bundle: string,
+  allowedHosts: string[],
+): string {
   const csp = pluginCSP(allowedHosts);
   return `<!doctype html>
 <html><head>

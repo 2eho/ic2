@@ -2,7 +2,7 @@
  * SSE 客户端：单连接多路复用（docs/design/03 §2.6）。
  * 关键点：Last-Event-ID 续传、慢消费者背压、服务端 reconnect 事件后重连。
  */
-import { setTokenProvider } from './client';
+import { setTokenProvider } from "./client";
 
 export interface CanvasEvent {
   type: string;
@@ -25,7 +25,10 @@ export interface SSEOptions {
 /**
  * 连接画布事件流。返回显式 disconnect，调用方必须在 unmount 时调用，避免连接泄漏。
  */
-export function connectCanvasEvents(opts: SSEOptions): { disconnect: () => void; lastEventId: () => number } {
+export function connectCanvasEvents(opts: SSEOptions): {
+  disconnect: () => void;
+  lastEventId: () => number;
+} {
   const url = `/api/v1/canvases/${encodeURIComponent(opts.canvasId)}/events`;
   let source: EventSource | null = null;
   let lastId = 0;
@@ -51,9 +54,9 @@ export function connectCanvasEvents(opts: SSEOptions): { disconnect: () => void;
         type: ev.type,
         seq: data.seq ?? lastId,
         version: data.version ?? 0,
-        actor: data.actor ?? '',
+        actor: data.actor ?? "",
         op: data.op,
-        at: data.at ?? '',
+        at: data.at ?? "",
       });
     } catch {
       // 忽略无法解析的帧（服务端不应发出，但客户端不能因此崩溃）
@@ -63,17 +66,17 @@ export function connectCanvasEvents(opts: SSEOptions): { disconnect: () => void;
   const connect = () => {
     if (closed) return;
     // EventSource 无法自定义 header，因此 token 走 cookie（服务端同时支持 Bearer 与 cookie）
-    const q = lastId ? `?lastEventId=${lastId}` : '';
+    const q = lastId ? `?lastEventId=${lastId}` : "";
     source = new EventSource(url + q);
-    source.addEventListener('canvas.op', handle as EventListener);
-    source.addEventListener('run.step', handle as EventListener);
-    source.addEventListener('run.step.delta', handle as EventListener);
-    source.addEventListener('asset.created', handle as EventListener);
-    source.addEventListener('presence', handle as EventListener);
-    source.addEventListener('reconnect', () => {
+    source.addEventListener("canvas.op", handle as EventListener);
+    source.addEventListener("run.step", handle as EventListener);
+    source.addEventListener("run.step.delta", handle as EventListener);
+    source.addEventListener("asset.created", handle as EventListener);
+    source.addEventListener("presence", handle as EventListener);
+    source.addEventListener("reconnect", () => {
       reconnect();
     });
-    source.addEventListener('message', handle as EventListener);
+    source.addEventListener("message", handle as EventListener);
     source.onerror = (err) => {
       opts.onError?.(err);
       // 浏览器会自动重连；为避免风暴，这里交给 EventSource

@@ -11,14 +11,16 @@
   --ic-danger: #dc2626;
   --ic-ok: #16a34a;
   --ic-warn: #d97706;
-  --ic-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.06);
+  --ic-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.06);
   --ic-radius: 10px;
-  --ic-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', Roboto, sans-serif;
+  --ic-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
   --ic-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   --ic-bg: #0f1116;
   --ic-surface: #171a22;
   --ic-surface-2: #1f232d;
@@ -79,7 +81,9 @@ a {
   color: var(--ic-text);
   padding: 7px 12px;
   border-radius: 8px;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .ic-btn:hover:not(:disabled) {
   background: var(--ic-surface-2);

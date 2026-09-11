@@ -212,6 +212,11 @@ CREATE TABLE IF NOT EXISTS run_attempts (
   latency_ms   INTEGER NOT NULL DEFAULT 0,
   tokens_in    INTEGER NOT NULL DEFAULT 0,
   tokens_out   INTEGER NOT NULL DEFAULT 0,
+  -- 产出计数必须逐 attempt 落库：只存成本会让「重启后张数归零」，
+  -- 而张数是用户核对结果最直接的依据（INV-9 要求聚合与逐项一致）。
+  images       INTEGER NOT NULL DEFAULT 0,
+  video_millis INTEGER NOT NULL DEFAULT 0,
+  audio_millis INTEGER NOT NULL DEFAULT 0,
   cost_micros  INTEGER NOT NULL DEFAULT 0,
   remote_task_id TEXT,
   remote_provider TEXT,
@@ -345,4 +350,31 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version      TEXT PRIMARY KEY,
   applied_at   TEXT NOT NULL
+);
+
+-- 渠道下的模型列表（拉取上游后落库，避免每次进配置页都请求上游）。
+-- capabilities 是逗号分隔的能力标注，由关键词猜测后可由用户覆盖（对齐 §8.3）。
+CREATE TABLE IF NOT EXISTS models (
+  id            TEXT NOT NULL,
+  provider_id   TEXT NOT NULL,
+  display_name  TEXT NOT NULL DEFAULT '',
+  capabilities  TEXT NOT NULL DEFAULT '',
+  params_schema TEXT NOT NULL DEFAULT '{}',
+  updated_at    TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (provider_id, id)
+);
+
+-- 价格表（整数微元，INV-9）。未配置的模型回落到零值并在 UI 标注「未配置价格」，
+-- 而不是显示 0 元——后者会让用户以为免费。
+CREATE TABLE IF NOT EXISTS model_pricing (
+  provider_id            TEXT NOT NULL,
+  model_id               TEXT NOT NULL,
+  text_input_per_mtok    INTEGER NOT NULL DEFAULT 0,
+  text_output_per_mtok   INTEGER NOT NULL DEFAULT 0,
+  image_per_unit         INTEGER NOT NULL DEFAULT 0,
+  video_per_second       INTEGER NOT NULL DEFAULT 0,
+  audio_per_second       INTEGER NOT NULL DEFAULT 0,
+  currency               TEXT NOT NULL DEFAULT 'CNY',
+  updated_at             TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (provider_id, model_id)
 );

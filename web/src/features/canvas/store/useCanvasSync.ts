@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { api, ApiFailure, newIdempotencyKey } from '@/shared/api';
-import type { CanvasDoc, Op } from '../kernel/types';
-import type { CanvasKernel } from '../kernel';
-import type { TFn } from '@/app/App';
+import { useCallback, useEffect, useRef } from "react";
+import { api, ApiFailure, newIdempotencyKey } from "@/shared/api";
+import type { CanvasDoc, Op } from "../kernel/types";
+import type { CanvasKernel } from "../kernel";
+import type { TFn } from "@/app/App";
 
 interface Options {
   canvasId: string;
   kernel: CanvasKernel | null;
   t: TFn;
-  onState: (s: 'idle' | 'syncing' | 'error' | 'conflict' | 'offline') => void;
+  onState: (s: "idle" | "syncing" | "error" | "conflict" | "offline") => void;
 }
 
 export interface CanvasSync {
@@ -26,7 +26,12 @@ export interface CanvasSync {
  * - 本地 op 与请求一一对应，失败时不清空队列（避免静默丢改动）；
  * - 冲突（409）时用服务端权威文档 re-sync，并明确告知用户。
  */
-export function useCanvasSync({ canvasId, kernel, t, onState }: Options): CanvasSync {
+export function useCanvasSync({
+  canvasId,
+  kernel,
+  t,
+  onState,
+}: Options): CanvasSync {
   const flushing = useRef(false);
   const failed = useRef<Op[]>([]);
   const conflictRef = useRef<CanvasDoc | null>(null);
@@ -37,16 +42,21 @@ export function useCanvasSync({ canvasId, kernel, t, onState }: Options): Canvas
     const { baseVersion, ops } = kernel.submitPayload();
     if (ops.length === 0) return;
     flushing.current = true;
-    onState('syncing');
+    onState("syncing");
     try {
-      const res = await api.appendOps(canvasId, baseVersion, ops, newIdempotencyKey());
+      const res = await api.appendOps(
+        canvasId,
+        baseVersion,
+        ops,
+        newIdempotencyKey(),
+      );
       kernel.commitVersion(res.version);
       // 服务端自动 rebase 时以权威文档为准（本地与在途 op 已合并）
       if (res.rebased && res.document) {
         kernel.applyAuthoritative(res.document);
       }
       failed.current = [];
-      onState('idle');
+      onState("idle");
     } catch (e) {
       const err = e as ApiFailure;
       if (err.status === 409) {
@@ -56,15 +66,15 @@ export function useCanvasSync({ canvasId, kernel, t, onState }: Options): Canvas
           kernel.applyAuthoritative(auth);
           conflictRef.current = auth;
         } catch {
-          onState('offline');
+          onState("offline");
           return;
         }
-        onState('conflict');
+        onState("conflict");
         return;
       }
       // 网络类错误：保留 op 以便恢复后重发（不丢改动）
       failed.current = [...failed.current, ...ops];
-      onState('error');
+      onState("error");
     } finally {
       flushing.current = false;
     }
@@ -81,7 +91,10 @@ export function useCanvasSync({ canvasId, kernel, t, onState }: Options): Canvas
 
   const flushViewport = useCallback(() => {
     if (!kernel) return;
-    kernel.dispatch({ type: 'set-viewport', viewport: kernel.viewport.current });
+    kernel.dispatch({
+      type: "set-viewport",
+      viewport: kernel.viewport.current,
+    });
     flush();
   }, [kernel, flush]);
 
@@ -98,15 +111,15 @@ export function useCanvasSync({ canvasId, kernel, t, onState }: Options): Canvas
   // 网络恢复后重发失败的 op（断网 30s 恢复不丢不重，ATK-12）
   useEffect(() => {
     const onOnline = () => {
-      onState('idle');
+      onState("idle");
       flush();
     };
-    const onOffline = () => onState('offline');
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
+    const onOffline = () => onState("offline");
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
     return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
     };
   }, [flush, onState]);
 
@@ -118,5 +131,10 @@ export function useCanvasSync({ canvasId, kernel, t, onState }: Options): Canvas
     void t;
   }, [t]);
 
-  return { flush, flushViewport, applyRemoteOp, conflictDoc: conflictRef.current };
+  return {
+    flush,
+    flushViewport,
+    applyRemoteOp,
+    conflictDoc: conflictRef.current,
+  };
 }

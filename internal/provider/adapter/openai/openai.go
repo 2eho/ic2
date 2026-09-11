@@ -97,7 +97,7 @@ func (a *Adapter) imageGenerate(ctx context.Context, cred provider.Credential, r
 	}
 	var out imageResp
 	if err := a.transport.DoJSON(ctx, "POST", provider.TrimBaseURL(cred.BaseURL)+"/v1/images/generations",
-		provider.AuthHeaders(cred), body, &out); err != nil {
+		provider.RequestHeaders(cred, "openai", req.RequestID), body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	return imageResponse(out, req), nil
@@ -144,7 +144,7 @@ func (a *Adapter) imageEdit(ctx context.Context, cred provider.Credential, req p
 		return provider.Response{}, platform.AsError(err)
 	}
 
-	headers := provider.AuthHeaders(cred)
+	headers := provider.RequestHeaders(cred, "openai", req.RequestID)
 	headers["Content-Type"] = mw.FormDataContentType()
 	var out imageResp
 	if err := a.transport.DoJSON(ctx, "POST", provider.TrimBaseURL(cred.BaseURL)+"/v1/images/edits",
@@ -215,7 +215,7 @@ func (a *Adapter) textGenerate(ctx context.Context, cred provider.Credential, re
 	}
 	var out responsesResp
 	if err := a.transport.DoJSON(ctx, "POST", provider.TrimBaseURL(cred.BaseURL)+"/v1/responses",
-		provider.AuthHeaders(cred), body, &out); err != nil {
+		provider.RequestHeaders(cred, "openai", req.RequestID), body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	text := out.OutputText
@@ -271,7 +271,7 @@ func (a *Adapter) videoCreate(ctx context.Context, cred provider.Credential, req
 	}
 	var out videoResp
 	if err := a.transport.DoJSON(ctx, "POST", provider.TrimBaseURL(cred.BaseURL)+"/v1/videos",
-		provider.AuthHeaders(cred), body, &out); err != nil {
+		provider.RequestHeaders(cred, "openai", req.RequestID), body, &out); err != nil {
 		return provider.Response{}, err
 	}
 	if out.Error != nil {
@@ -289,7 +289,7 @@ func (a *Adapter) videoCreate(ctx context.Context, cred provider.Credential, req
 func (a *Adapter) Poll(ctx context.Context, cred provider.Credential, taskID string) (provider.RemoteTask, error) {
 	var out videoResp
 	if err := a.transport.DoJSON(ctx, "GET", provider.TrimBaseURL(cred.BaseURL)+"/v1/videos/"+taskID,
-		provider.AuthHeaders(cred), nil, &out); err != nil {
+		provider.RequestHeaders(cred, "openai", ""), nil, &out); err != nil {
 		return provider.RemoteTask{}, err
 	}
 	task := provider.RemoteTask{ID: out.ID, Provider: "openai", Status: out.Status, Progress: out.Progress}
@@ -304,7 +304,7 @@ func (a *Adapter) FetchAsset(ctx context.Context, cred provider.Credential, ref 
 	if ref.URL == "" {
 		return nil, "", &provider.ProviderError{Class: provider.ClassPermanent, Code: platform.CodeInvalidRequest, Message: "asset has no url"}
 	}
-	return a.transport.DoRaw(ctx, "GET", ref.URL, provider.AuthHeaders(cred))
+	return a.transport.DoRaw(ctx, "GET", ref.URL, provider.RequestHeaders(cred, "openai", ""))
 }
 
 // ------------------------------------------------------------------ 音频
@@ -328,7 +328,7 @@ func (a *Adapter) audioSpeech(ctx context.Context, cred provider.Credential, req
 		Instructions:   strParam(req.Params, "audioInstructions", ""),
 	}
 	rc, mime, err := postJSONForBinary(a.transport, ctx, provider.TrimBaseURL(cred.BaseURL)+"/v1/audio/speech",
-		provider.AuthHeaders(cred), body)
+		provider.RequestHeaders(cred, "openai", req.RequestID), body)
 	if err != nil {
 		return provider.Response{}, err
 	}
@@ -358,7 +358,7 @@ type modelsResp struct {
 func (a *Adapter) ListModels(ctx context.Context, cred provider.Credential) ([]provider.ModelInfo, error) {
 	var out modelsResp
 	if err := a.transport.DoJSON(ctx, "GET", provider.TrimBaseURL(cred.BaseURL)+"/v1/models",
-		provider.AuthHeaders(cred), nil, &out); err != nil {
+		provider.RequestHeaders(cred, "openai", ""), nil, &out); err != nil {
 		return nil, err
 	}
 	models := make([]provider.ModelInfo, 0, len(out.Data))

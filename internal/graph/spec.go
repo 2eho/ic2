@@ -257,9 +257,9 @@ func ValidateSpec(t NodeTypeID, spec NodeSpec) error {
 			if !ok {
 				return errInvalidSpec(t, "outputCount must be integer")
 			}
-			if n < 1 || n > 15 {
+			if n < MinVariantsPerNode || n > MaxVariantsPerNode {
 				return NewError(422, CodeInvalidSpec, "outputCount out of range").
-					WithDetail("min", 1).WithDetail("max", 15).WithDetail("got", n)
+					WithDetail("min", MinVariantsPerNode).WithDetail("max", MaxVariantsPerNode).WithDetail("got", n)
 			}
 		}
 		if raw, ok := spec["capability"]; ok {

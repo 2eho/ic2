@@ -1,5 +1,5 @@
 /** 会话 token 存取。刻意不用 localStorage：只在内存 + sessionStorage。 */
-const KEY = 'ic.session.token';
+const KEY = "ic.session.token";
 
 let memoryToken: string | null = null;
 

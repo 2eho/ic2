@@ -1,6 +1,6 @@
-import { useSyncExternalStore } from 'react';
-import type { CanvasKernel } from '../kernel';
-import type { Selection } from '../kernel/types';
+import { useSyncExternalStore } from "react";
+import type { CanvasKernel } from "../kernel";
+import type { Selection } from "../kernel/types";
 
 /** 订阅内核的粗粒度版本号：内核变更时返回自增快照，驱动 React 重渲染。 */
 export function useKernelVersion(kernel: CanvasKernel): number {

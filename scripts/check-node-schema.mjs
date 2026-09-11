@@ -18,9 +18,16 @@ const goTypes = new Set();
 for (const m of go.matchAll(/NodeType(\w+):\s*\{/g)) {
   if (m[1] !== 'ID') goTypes.add(m[1].toLowerCase());
 }
+// 只取 NODE_SCHEMAS 对象内部的键，避免把其他同名层级对象误认为节点类型。
 const tsTypes = new Set();
-for (const m of ts.matchAll(/^\s{2}(\w+):\s*\{\s*$/gm)) {
-  tsTypes.add(m[1]);
+const schemasStart = ts.indexOf('NODE_SCHEMAS');
+if (schemasStart < 0) {
+  problems.push('前端 schema.ts 中未找到 NODE_SCHEMAS');
+} else {
+  const body = ts.slice(schemasStart);
+  for (const m of body.matchAll(/^ {2}(\w+):\s*\{/gm)) {
+    tsTypes.add(m[1]);
+  }
 }
 
 for (const t of goTypes) {
@@ -90,7 +97,9 @@ function parseGoSchemas(src) {
 
 function parseTsSchemas(src) {
   const out = {};
-  const blocks = src.split(/\n  (\w+):\s*\{/);
+  const start = src.indexOf('NODE_SCHEMAS');
+  const scoped = start >= 0 ? src.slice(start) : src;
+  const blocks = scoped.split(/\n  (\w+):\s*\{/);
   for (let i = 1; i < blocks.length; i += 2) {
     const type = blocks[i];
     const body = blocks[i + 1] ?? '';
@@ -121,9 +130,13 @@ function parseTsSchemas(src) {
     const outIdx = portsBody.indexOf('outputs:');
     const inSection = outIdx >= 0 ? portsBody.slice(0, outIdx) : portsBody;
     const outSection = outIdx >= 0 ? portsBody.slice(outIdx) : '';
+    // 兼容单引号与双引号（prettier 的 quote 配置会改变这一处，
+    // 而解析器不应该因为格式化风格变化就误报「端口缺失」——那是假阳性，
+    // 会让真正的 schema 漂移被淹没在噪音里）。
+    const portPattern = /P\(\s*['"]([\w-]+)['"]/g;
     out[type] = {
-      inputs: [...inSection.matchAll(/P\('([\w-]+)'/g)].map((m) => m[1]),
-      outputs: [...outSection.matchAll(/P\('([\w-]+)'/g)].map((m) => m[1]),
+      inputs: [...inSection.matchAll(portPattern)].map((m) => m[1]),
+      outputs: [...outSection.matchAll(portPattern)].map((m) => m[1]),
     };
   }
   return out;

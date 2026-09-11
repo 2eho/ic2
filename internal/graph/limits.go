@@ -14,6 +14,13 @@ const (
 	MaxTitleLen = 200
 	// MaxPromptBytes 提示词/文本内容字节上限（32KB）。
 	MaxPromptBytes = 32 * 1024
+	// MaxVariantsPerNode 单节点结果变体上限。
+	//
+	// 与 outputCount 共用同一上限：一次生成最多产出 N 个变体，
+	// 回写时也只能写入 N 个。两处用不同数字会导致「能生成但不能回写」。
+	MaxVariantsPerNode = 15
+	// MinVariantsPerNode 单节点结果变体下限（至少产出 1 个）。
+	MinVariantsPerNode = 1
 )
 
 // 几何边界。

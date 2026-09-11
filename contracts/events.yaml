@@ -1,0 +1,45 @@
+# 实时事件契约（唯一真源）。
+#
+# 三个通道：
+#   - canvas：GET /api/v1/canvases/{cid}/events（SSE），对应 internal/graph 的 Event
+#   - run   ：Run 步骤进度（轮询或 SSE），对应 internal/exec 的 RunEvent
+#   - agent ：Agent 条目，对应 internal/agent 的 Item 实时流
+#
+# 纪律：
+#   1. 事件类型只在 internal/contract 定义常量（由本文件生成），业务代码禁止裸写字符串；
+#   2. 前端 web/src/shared/api/sse.ts 必须注册本文件声明的**全部**类型，未识别类型按「忽略」处理；
+#   3. 一致性由 make gen 与 internal/api/apitest 的事件契约测试强制。
+events:
+  - type: canvas.op
+    channel: canvas
+    desc: 一次 op 批量已应用，携带新版本号、序号与操作者
+  - type: canvas.snapshot
+    channel: canvas
+    desc: 权威文档快照（重连补齐或版本冲突后下发）
+  - type: canvas.presence
+    channel: canvas
+    desc: 在线状态与光标，不持久化
+  - type: run.step.started
+    channel: run
+    desc: 步骤开始执行
+  - type: run.step.succeeded
+    channel: run
+    desc: 步骤成功，携带输出资产 id
+  - type: run.step.failed
+    channel: run
+    desc: 步骤失败，携带稳定错误码与分类
+  - type: run.step.retrying
+    channel: run
+    desc: 步骤按退避策略重试
+  - type: run.step.writeback_failed
+    channel: run
+    desc: 生成成功但写回画布失败（可观测，不静默）
+  - type: run.finished
+    channel: run
+    desc: Run 收敛到终态 succeeded/failed/canceled/partial
+  - type: agent.item
+    channel: agent
+    desc: Agent 条目（消息/思考/工具调用/结果/文件变更/错误）到达
+  - type: agent.turn
+    channel: agent
+    desc: 轮次状态变化，含待审批

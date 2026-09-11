@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { api } from '@/shared/api';
-import type { CanvasKernel } from '../kernel';
-import type { RawNode } from '../kernel/types';
-import { useWorkspace } from '@/features/settings/useWorkspace';
-import { canUseTool, imageToolsFor } from '../tools/registry';
-import { ImageToolDialog } from '../tools/ImageToolDialog';
-import type { TFn } from '@/app/App';
+import { useState } from "react";
+import { api } from "@/shared/api";
+import type { CanvasKernel } from "../kernel";
+import type { RawNode } from "../kernel/types";
+import { useWorkspace } from "@/shared/session/workspace";
+import { canUseTool, imageToolsFor } from "../tools/registry";
+import { ImageToolDialog } from "../tools/ImageToolDialog";
+import type { TFn } from "@/app/App";
 
 interface Props {
   t: TFn;
@@ -25,12 +25,13 @@ export function NodeHoverToolbar({ t, kernel, node, onCommit, onRun }: Props) {
   const [copied, setCopied] = useState(false);
 
   const tools = imageToolsFor(node);
-  const assetId = String(node.spec.assetId ?? '');
-  const variantAsset = node.result?.variants?.[node.result?.primary ?? 0]?.assetId ?? '';
+  const assetId = String(node.spec.assetId ?? "");
+  const variantAsset =
+    node.result?.variants?.[node.result?.primary ?? 0]?.assetId ?? "";
   const effectiveAsset = assetId || variantAsset;
 
   const remove = () => {
-    kernel.dispatch({ type: 'delete-nodes', ids: [node.id] });
+    kernel.dispatch({ type: "delete-nodes", ids: [node.id] });
     onCommit();
   };
 
@@ -39,9 +40,9 @@ export function NodeHoverToolbar({ t, kernel, node, onCommit, onRun }: Props) {
     const texts: string[] = [];
     for (const e of upstream) {
       const src = kernel.scene.getNode(e.from.nodeId);
-      if (src?.type === 'prompt') texts.push(String(src.spec.text ?? ''));
+      if (src?.type === "prompt") texts.push(String(src.spec.text ?? ""));
     }
-    const payload = texts.filter(Boolean).join('\n\n');
+    const payload = texts.filter(Boolean).join("\n\n");
     if (!payload) return;
     try {
       await navigator.clipboard.writeText(payload);
@@ -55,64 +56,114 @@ export function NodeHoverToolbar({ t, kernel, node, onCommit, onRun }: Props) {
   return (
     <div
       style={{
-        position: 'absolute',
+        position: "absolute",
         top: -34,
         left: 0,
-        display: 'flex',
+        display: "flex",
         gap: 2,
         padding: 3,
         borderRadius: 8,
-        background: 'var(--ic-surface)',
-        border: '1px solid var(--ic-border)',
-        boxShadow: 'var(--ic-shadow)',
-        whiteSpace: 'nowrap',
+        background: "var(--ic-surface)",
+        border: "1px solid var(--ic-border)",
+        boxShadow: "var(--ic-shadow)",
+        whiteSpace: "nowrap",
         zIndex: 100,
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <ToolBtn label={t('canvas.tool.info')} onClick={() => setOpenTool('info')} />
-      <ToolBtn label={t('canvas.tool.copyPrompt')} onClick={copyPrompt} done={copied} />
-      {canUseTool('retry', node) && <ToolBtn label={t('canvas.tool.retry')} onClick={() => onRun([node.id])} />}
-      {effectiveAsset && canUseTool('saveAsset', node) && (
+      <ToolBtn
+        label={t("canvas.tool.info")}
+        onClick={() => setOpenTool("info")}
+      />
+      <ToolBtn
+        label={t("canvas.tool.copyPrompt")}
+        onClick={copyPrompt}
+        done={copied}
+      />
+      {canUseTool("retry", node) && (
         <ToolBtn
-          label={t('canvas.tool.saveAsset')}
+          label={t("canvas.tool.retry")}
+          onClick={() => onRun([node.id])}
+        />
+      )}
+      {effectiveAsset && canUseTool("saveAsset", node) && (
+        <ToolBtn
+          label={t("canvas.tool.saveAsset")}
           onClick={async () => {
-            const res = await fetch(api.assetRawUrl(effectiveAsset, workspaceId));
+            const res = await fetch(
+              api.assetRawUrl(effectiveAsset, workspaceId),
+            );
             const blob = await res.blob();
-            await api.uploadAsset(workspaceId, blob, `${node.title || 'asset'}.png`);
+            await api.uploadAsset(
+              workspaceId,
+              blob,
+              `${node.title || "asset"}.png`,
+            );
           }}
         />
       )}
       {effectiveAsset && (
-        <a className="ic-btn ic-btn--ghost" style={{ padding: '2px 6px', fontSize: 11, textDecoration: 'none' }}
-          href={api.assetRawUrl(effectiveAsset, workspaceId)} download>
-          {t('canvas.tool.download')}
+        <a
+          className="ic-btn ic-btn--ghost"
+          style={{ padding: "2px 6px", fontSize: 11, textDecoration: "none" }}
+          href={api.assetRawUrl(effectiveAsset, workspaceId)}
+          download
+        >
+          {t("canvas.tool.download")}
         </a>
       )}
       {tools.map((tool) => (
-        <ToolBtn key={tool.id} label={t(tool.labelKey)} onClick={() => setOpenTool(tool.id)} />
+        <ToolBtn
+          key={tool.id}
+          label={t(tool.labelKey)}
+          onClick={() => setOpenTool(tool.id)}
+        />
       ))}
-      <ToolBtn label={t('canvas.tool.delete')} danger onClick={remove} />
+      <ToolBtn label={t("canvas.tool.delete")} danger onClick={remove} />
 
-      {openTool === 'info' && (
-        <ImageToolDialog t={t} tool="info" kernel={kernel} node={node} onClose={() => setOpenTool(null)} onCommit={onCommit} />
+      {openTool === "info" && (
+        <ImageToolDialog
+          t={t}
+          tool="info"
+          kernel={kernel}
+          node={node}
+          onClose={() => setOpenTool(null)}
+          onCommit={onCommit}
+        />
       )}
-      {openTool && openTool !== 'info' && (
-        <ImageToolDialog t={t} tool={openTool} kernel={kernel} node={node} onClose={() => setOpenTool(null)} onCommit={onCommit} />
+      {openTool && openTool !== "info" && (
+        <ImageToolDialog
+          t={t}
+          tool={openTool}
+          kernel={kernel}
+          node={node}
+          onClose={() => setOpenTool(null)}
+          onCommit={onCommit}
+        />
       )}
     </div>
   );
 }
 
-function ToolBtn({ label, onClick, danger, done }: { label: string; onClick: () => void; danger?: boolean; done?: boolean }) {
+function ToolBtn({
+  label,
+  onClick,
+  danger,
+  done,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  done?: boolean;
+}) {
   return (
     <button
-      className={`ic-btn ic-btn--ghost ${danger ? 'ic-btn--danger' : ''}`}
-      style={{ padding: '2px 6px', fontSize: 11 }}
+      className={`ic-btn ic-btn--ghost ${danger ? "ic-btn--danger" : ""}`}
+      style={{ padding: "2px 6px", fontSize: 11 }}
       onClick={onClick}
       title={label}
     >
-      {done ? '✓' : label}
+      {done ? "✓" : label}
     </button>
   );
 }

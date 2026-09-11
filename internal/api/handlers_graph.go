@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -67,7 +68,22 @@ func (h *handlers) getCanvas(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	doc, err := h.deps.Graph.Get(r.Context(), r.PathValue("cid"))
+	// ATK-08：读画布必须校验归属。只校验「已认证」等于任何登录用户都能读任意画布。
+	//
+	// 归属通过 canvas → project → workspace 在服务端解析，绝不采信客户端传参。
+	// 无权访问时返回 404 而不是 403：403 会确认「该画布存在」，可用于枚举。
+	canvasID := r.PathValue("cid")
+	if wsID := h.workspaceOfCanvas(r, canvasID); wsID != "" {
+		if _, werr := h.requireWorkspace(r, wsID); werr != nil {
+			writeError(w, r, platform.ErrNotFound("canvas"))
+			return
+		}
+	} else if h.deps.Auth != nil {
+		// 解析不出归属（画布不存在）时同样按 404 处理，避免存在性探测。
+		writeError(w, r, platform.ErrNotFound("canvas"))
+		return
+	}
+	doc, err := h.deps.Graph.Get(r.Context(), canvasID)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -90,6 +106,17 @@ func (h *handlers) appendOps(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.principal(r)
 	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	// ATK-07：viewer 提交 op 必须 403。角色从画布所属工作区解析，
+	// 不能只依赖「主体存在」——认证 ≠ 授权。
+	if wsID := h.workspaceOfCanvas(r, r.PathValue("cid")); wsID != "" {
+		if wp, werr := h.requireWorkspace(r, wsID); werr == nil {
+			p = wp
+		}
+	}
+	if err := h.requireAction(r, p, ActWriteContent); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -299,4 +326,25 @@ func parseLimit(q string, def, max int) int {
 		return max
 	}
 	return n
+}
+
+// workspaceOfCanvas 反查画布所属工作区。
+//
+// 为什么需要：op 请求的路径里只有 canvasId，没有 workspaceId。
+// 授权必须基于画布真正的归属，而不是客户端传来的 workspaceId
+// （否则攻击者只要伪造一个自己有权的工作区 id 就能绕过校验）。
+func (h *handlers) workspaceOfCanvas(r *http.Request, canvasID string) string {
+	if h.deps.Graph == nil || canvasID == "" {
+		return ""
+	}
+	type wsResolver interface {
+		WorkspaceOf(ctx context.Context, canvasID string) (string, error)
+	}
+	if res, ok := h.deps.Graph.(wsResolver); ok {
+		ws, err := res.WorkspaceOf(r.Context(), canvasID)
+		if err == nil {
+			return ws
+		}
+	}
+	return ""
 }

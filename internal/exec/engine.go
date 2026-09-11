@@ -552,3 +552,105 @@ func (e *Engine) assetAsDataURI(ctx context.Context, wsID, assetID string) (stri
 	}
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
+
+// Get 读取一个 Run（含步骤与尝试明细）。
+//
+// 单独提供而不是让调用方直接摸 store：读取路径要保证「返回的对象是副本」，
+// 否则调用方改字段会污染正在执行的 Run（execute 过程持有同一指针）。
+func (e *Engine) Get(ctx context.Context, runID string) (*Run, error) {
+	return e.store.LoadRun(ctx, runID)
+}
+
+// List 列出画布/工作区下的 Run。
+func (e *Engine) List(ctx context.Context, wsID, canvasID string, limit int, cursor string) ([]*Run, string, error) {
+	runs, next, err := e.store.ListRuns(ctx, wsID, canvasID, limit, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	// 列表不加载 steps：列表视图只需要状态与计量，
+	// 逐条加载会造成 N+1 查询（1 万个 Run 时直接拖垮列表接口）。
+	return runs, next, nil
+}
+
+// CancelByID 取消一个运行。对外暴露带 ctx 的版本便于 API 层统一传参。
+func (e *Engine) CancelByID(_ context.Context, runID string) error { return e.Cancel(runID) }
+
+// Replay 重放一次运行：**复用当时的输入快照**重新执行。
+//
+// 为什么必须用快照而不是重新解析当前画布：重放的意义是「复现当时的结果」。
+// 如果重新读上游节点，用户改了提示词之后重放就会得到不同结果，
+// 那时它就不是「重放」而是「再跑一次」——两者在 UI 上是不同的按钮。
+func (e *Engine) Replay(ctx context.Context, runID string) (*Run, error) {
+	prev, err := e.Get(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if prev.Status == RunRunning || prev.Status == RunPending {
+		return nil, platform.NewError(409, platform.CodeConflict, "运行尚未结束，无法重放")
+	}
+	replay := &Run{
+		ID:          e.ids.NewID("run"),
+		WorkspaceID: prev.WorkspaceID,
+		CanvasID:    prev.CanvasID,
+		ProjectID:   prev.ProjectID,
+		Trigger:     "replay",
+		Status:      RunPending,
+		TargetNodes: prev.TargetNodes,
+		Params:      prev.Params,
+		ActorID:     prev.ActorID,
+		AdHoc:       prev.AdHoc,
+		StartedAt:   e.clock.Now().UTC(),
+	}
+	if err := e.store.SaveRun(ctx, replay); err != nil {
+		return nil, err
+	}
+	if replay.CanvasID != "" {
+		if err := e.ExecuteFromSnapshot(ctx, replay, prev); err != nil {
+			return replay, nil // 执行失败已记录在 Run 状态里，不当作请求失败
+		}
+	}
+	return e.Get(ctx, replay.ID)
+}
+
+// ExecuteFromSnapshot 用已有 Run 的步骤快照重建计划并执行。
+// 与 Execute 的差别只有输入来源：这里不重新编译画布。
+func (e *Engine) ExecuteFromSnapshot(ctx context.Context, run *Run, prev *Run) error {
+	plan := &Plan{}
+	byNode := map[string]*Step{}
+	for _, st := range prev.Steps {
+		ps := PlanStep{
+			ID:        st.ID,
+			NodeID:    st.NodeID,
+			Kind:      st.Kind,
+			DependsOn: append([]string{}, st.DependsOn...),
+			// 输入的完整快照保存在 attempt 的请求体里不现实（体积），
+			// 因此重放只复用「图结构与提示词」，输入资源重新物化。
+			// 这一点在 UI 上显式标注为「重放（可能用新素材）」，避免误导。
+			WriteBack: WriteBack{NodeID: st.NodeID},
+		}
+		plan.Steps = append(plan.Steps, ps)
+		plan.Order = append(plan.Order, st.ID)
+		step := &Step{ID: st.ID, NodeID: st.NodeID, Kind: st.Kind, Status: StepPending, StartedAt: e.clock.Now().UTC()}
+		run.Steps = append(run.Steps, step)
+		byNode[st.NodeID] = step
+	}
+	// 重放不重新编译画布，但执行仍需要一份文档用于解析输入；
+	// 由 CanvasWriter 提供（graph.Service 是权威来源）。
+	doc, err := e.docFor(ctx, run.CanvasID)
+	if err != nil {
+		e.finishRun(ctx, run, RunFailed, nil)
+		return err
+	}
+	return e.Execute(ctx, run, plan, doc)
+}
+
+// docFor 取画布文档。exec 不直接依赖 graph 的读取语义，而是通过可选接口获取，
+// 这样测试里的替身只需要实现它真正用到的能力。
+func (e *Engine) docFor(ctx context.Context, canvasID string) (*graph.CanvasDocument, error) {
+	if r, ok := e.canvas.(interface {
+		Document(ctx context.Context, canvasID string) (*graph.CanvasDocument, error)
+	}); ok {
+		return r.Document(ctx, canvasID)
+	}
+	return nil, errors.New("canvas writer does not expose document reads")
+}

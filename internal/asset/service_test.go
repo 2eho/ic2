@@ -83,7 +83,7 @@ func TestUploadDeduplicatesByContent(t *testing.T) {
 }
 
 // ATK-05：上传文件名为 ../../x.png，Blob 路径必须是 hash，无穿越。
-func TestUploadSanitizesFileName(t *testing.T) {
+func TestATK05UploadSanitizesFileName(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	data := pngBytes(t, 8, 8)
@@ -117,7 +117,7 @@ func TestCrossWorkspaceAssetIsolation(t *testing.T) {
 }
 
 // ATK-16：GC 运行期间被重新引用的资产不得被删除。
-func TestGCKeepsReferencedAsset(t *testing.T) {
+func TestATK16GCKeepsReferencedAsset(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	data := pngBytes(t, 8, 8)

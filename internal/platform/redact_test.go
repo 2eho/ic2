@@ -6,7 +6,9 @@ import (
 )
 
 // ATK-06：日志中打入 Authorization: Bearer sk-x，日志中必须为 ***。
-func TestRedactCredentialLeak(t *testing.T) {
+// ATK-06：日志中打入 Authorization: Bearer sk-x，落盘内容必须是掩码。
+// 判据不止「含 ***」——还必须确认原文一字不剩，否则等于没脱敏。
+func TestATK06LoggerNeverPersistsCredential(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string

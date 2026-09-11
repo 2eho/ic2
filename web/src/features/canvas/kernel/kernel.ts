@@ -1,11 +1,20 @@
-import { SceneGraph } from './scene';
-import { ViewportController } from './viewport';
-import { UndoStack, type UndoEntry } from './undo';
-import { InteractionMachine, type Intent } from './interaction';
-import { coalesceOps, commandToOps, type Command } from './commands';
-import type { CanvasDoc, Op, RawEdge, RawNode, Rect, Selection, Vec2, Viewport } from './types';
-import { applyResize } from './geometry';
-import { defaultSchemaFor, newLocalID } from './schema';
+import { SceneGraph } from "./scene";
+import { ViewportController } from "./viewport";
+import { UndoStack, type UndoEntry } from "./undo";
+import { InteractionMachine, type Intent } from "./interaction";
+import { coalesceOps, commandToOps, type Command } from "./commands";
+import type {
+  CanvasDoc,
+  Op,
+  RawEdge,
+  RawNode,
+  Rect,
+  Selection,
+  Vec2,
+  Viewport,
+} from "./types";
+import { applyResize } from "./geometry";
+import { defaultSchemaFor, newLocalID } from "./schema";
 
 /**
  * 内核门面：把视口、场景图、交互状态机、命令总线、undo 组合成单一 API。
@@ -31,7 +40,7 @@ export class CanvasKernel {
   private viewportListeners = new Set<(v: Viewport) => void>();
   private version: number;
 
-  constructor(doc: CanvasDoc, localActor = '') {
+  constructor(doc: CanvasDoc, localActor = "") {
     this.doc = doc;
     this.localActor = localActor;
     this.version = doc.version;
@@ -44,7 +53,10 @@ export class CanvasKernel {
   }
 
   get currentSelection(): Selection {
-    return { nodes: [...this.selection.nodes], edges: [...this.selection.edges] };
+    return {
+      nodes: [...this.selection.nodes],
+      edges: [...this.selection.edges],
+    };
   }
 
   get settings() {
@@ -98,7 +110,7 @@ export class CanvasKernel {
   dispatch(cmd: Command): Op[] {
     if (this.doc.settings.readOnly) return [];
     const ops = commandToOps(cmd);
-    if (ops.length === 0 && cmd.type !== 'duplicate-nodes') return [];
+    if (ops.length === 0 && cmd.type !== "duplicate-nodes") return [];
 
     const before = this.snapshotFor(cmd);
     this.applyLocal(ops);
@@ -111,7 +123,8 @@ export class CanvasKernel {
       inverse,
       removedNodes: before.removedNodes,
       removedEdges: before.removedEdges,
-      prevViewport: cmd.type === 'set-viewport' ? before.prevViewport : undefined,
+      prevViewport:
+        cmd.type === "set-viewport" ? before.prevViewport : undefined,
       at: Date.now(),
     });
 
@@ -141,19 +154,29 @@ export class CanvasKernel {
       id,
       type,
       title: schema.title,
-      rect: { x: Math.round(worldPos.x), y: Math.round(worldPos.y), w: schema.w, h: schema.h },
+      rect: {
+        x: Math.round(worldPos.x),
+        y: Math.round(worldPos.y),
+        w: schema.w,
+        h: schema.h,
+      },
       z: this.nextZ(),
       ports: schema.ports,
       spec: { ...schema.spec },
-      state: 'idle',
+      state: "idle",
     };
-    this.dispatch({ type: 'add-node', node });
+    this.dispatch({ type: "add-node", node });
     this.selection = { nodes: [id], edges: [] };
     return node;
   }
 
   /** 创建连线（含端口类型校验与单入端口替换，语义与服务端一致）。 */
-  createEdge(fromNode: string, fromPort: string, toNode: string, toPort: string): RawEdge | null {
+  createEdge(
+    fromNode: string,
+    fromPort: string,
+    toNode: string,
+    toPort: string,
+  ): RawEdge | null {
     const a = this.scene.getNode(fromNode);
     const b = this.scene.getNode(toNode);
     if (!a || !b || fromNode === toNode) return null;
@@ -161,13 +184,13 @@ export class CanvasKernel {
     const inp = b.ports.inputs.find((p) => p.id === toPort);
     if (!out || !inp || out.kind !== inp.kind) return null;
     const edge: RawEdge = {
-      id: newLocalID('e'),
+      id: newLocalID("e"),
       from: { nodeId: fromNode, portId: fromPort },
       to: { nodeId: toNode, portId: toPort },
       kind: out.kind,
       createdAt: new Date().toISOString(),
     };
-    this.dispatch({ type: 'connect', edge });
+    this.dispatch({ type: "connect", edge });
     return edge;
   }
 
@@ -182,19 +205,21 @@ export class CanvasKernel {
   /** 复制选中节点（含内部连线），返回新节点 ID 映射（对齐原项目复制粘贴语义）。 */
   duplicateNodes(ids: string[], offset = 24): Record<string, string> {
     const idMap: Record<string, string> = {};
-    const nodes = ids.map((id) => this.scene.getNode(id)).filter((n): n is RawNode => Boolean(n));
+    const nodes = ids
+      .map((id) => this.scene.getNode(id))
+      .filter((n): n is RawNode => Boolean(n));
     for (const n of nodes) {
-      const newId = newLocalID(n.type === 'group' ? 'grp' : 'n');
+      const newId = newLocalID(n.type === "group" ? "grp" : "n");
       idMap[n.id] = newId;
       this.dispatch({
-        type: 'add-node',
+        type: "add-node",
         node: {
           ...n,
           id: newId,
           rect: { ...n.rect, x: n.rect.x + offset, y: n.rect.y + offset },
           z: this.nextZ(),
-          parentId: n.parentId ? idMap[n.parentId] ?? n.parentId : undefined,
-          state: 'idle',
+          parentId: n.parentId ? (idMap[n.parentId] ?? n.parentId) : undefined,
+          state: "idle",
           result: undefined,
           error: null,
         },
@@ -204,9 +229,9 @@ export class CanvasKernel {
     for (const e of this.scene.allEdges()) {
       if (idMap[e.from.nodeId] && idMap[e.to.nodeId]) {
         this.dispatch({
-          type: 'connect',
+          type: "connect",
           edge: {
-            id: newLocalID('e'),
+            id: newLocalID("e"),
             from: { nodeId: idMap[e.from.nodeId], portId: e.from.portId },
             to: { nodeId: idMap[e.to.nodeId], portId: e.to.portId },
             kind: e.kind,
@@ -259,41 +284,54 @@ export class CanvasKernel {
   /** 内核层处理交互事件，产出并执行意图。 */
   handleIntent(intent: Intent): Op[] {
     switch (intent.type) {
-      case 'pan': {
+      case "pan": {
         this.viewport.panBy(intent.dx, intent.dy);
         this.interaction.commitOrigin({ x: 0, y: 0 });
         this.notifyViewport();
         return [];
       }
-      case 'zoom': {
+      case "zoom": {
         this.viewport.zoomAt(intent.point, intent.delta);
         this.notifyViewport();
         return [];
       }
-      case 'select': {
+      case "select": {
         this.selection = intent.selection;
         this.notify();
         return [];
       }
-      case 'clear-selection': {
+      case "clear-selection": {
         this.selection = { nodes: [], edges: [] };
         this.notify();
         return [];
       }
-      case 'drag': {
+      case "drag": {
         const ids = this.selection.nodes.length ? this.selection.nodes : [];
         if (ids.length === 0) return [];
-        const ops = this.dispatch({ type: 'move-nodes', ids, dx: intent.dx, dy: intent.dy });
+        const ops = this.dispatch({
+          type: "move-nodes",
+          ids,
+          dx: intent.dx,
+          dy: intent.dy,
+        });
         this.interaction.commitOrigin(this.lastPoint ?? { x: 0, y: 0 });
         return ops;
       }
-      case 'resize': {
+      case "resize": {
         const id = this.selection.nodes[0];
         if (!id) return [];
         const node = this.scene.getNode(id);
         if (!node) return [];
-        const rect = applyResize(node.rect, intent.handle, { dx: intent.dx, dy: intent.dy });
-        return this.dispatch({ type: 'resize-node', id, rect, keepAspect: !node.spec.freeResize });
+        const rect = applyResize(node.rect, intent.handle, {
+          dx: intent.dx,
+          dy: intent.dy,
+        });
+        return this.dispatch({
+          type: "resize-node",
+          id,
+          rect,
+          keepAspect: !node.spec.freeResize,
+        });
       }
       default:
         return [];
@@ -307,8 +345,12 @@ export class CanvasKernel {
 
   /** 由 React 层在每次 pointermove 时告知当前指针位置。 */
   notePointer(point: Vec2): void {
-    if (!this.lastPoint || this.interaction.current === 'idle' || this.interaction.current === 'marquee') {
-      if (this.interaction.current === 'marquee' && !this.lastDownPoint) {
+    if (
+      !this.lastPoint ||
+      this.interaction.current === "idle" ||
+      this.interaction.current === "marquee"
+    ) {
+      if (this.interaction.current === "marquee" && !this.lastDownPoint) {
         this.lastDownPoint = point;
       }
     }
@@ -324,10 +366,10 @@ export class CanvasKernel {
   private applyLocal(ops: Op[]): void {
     for (const op of ops) {
       switch (op.kind) {
-        case 'add_node':
+        case "add_node":
           this.scene.addNode(op.node);
           break;
-        case 'remove_node': {
+        case "remove_node": {
           const n = this.scene.removeNode(op.id);
           if (n) {
             for (const e of this.scene.edgesOf(op.id)) {
@@ -336,7 +378,7 @@ export class CanvasKernel {
           }
           break;
         }
-        case 'move_node': {
+        case "move_node": {
           const n = this.scene.getNode(op.id);
           if (!n) break;
           const next: RawNode = {
@@ -350,19 +392,22 @@ export class CanvasKernel {
           this.scene.updateNode(next);
           break;
         }
-        case 'resize_node': {
+        case "resize_node": {
           const n = this.scene.getNode(op.id);
           if (!n) break;
-          this.scene.updateNode({ ...n, rect: { ...n.rect, w: op.w, h: op.h } });
+          this.scene.updateNode({
+            ...n,
+            rect: { ...n.rect, w: op.w, h: op.h },
+          });
           break;
         }
-        case 'set_title': {
+        case "set_title": {
           const n = this.scene.getNode(op.id);
           if (!n) break;
           this.scene.updateNode({ ...n, title: op.title || n.title });
           break;
         }
-        case 'set_spec': {
+        case "set_spec": {
           const n = this.scene.getNode(op.id);
           if (!n) break;
           const spec = { ...n.spec };
@@ -371,58 +416,64 @@ export class CanvasKernel {
           this.scene.updateNode({ ...n, spec });
           break;
         }
-        case 'set_state': {
+        case "set_state": {
           const n = this.scene.getNode(op.id);
           if (!n) break;
           this.scene.updateNode({
             ...n,
             state: op.state,
-            result: op.result ?? (op.state === 'idle' ? undefined : n.result),
-            error: op.error ?? (op.state === 'idle' ? null : n.error),
+            result: op.result ?? (op.state === "idle" ? undefined : n.result),
+            error: op.error ?? (op.state === "idle" ? null : n.error),
           });
           break;
         }
-        case 'add_edge': {
+        case "add_edge": {
           const from = this.scene.getNode(op.edge.from.nodeId);
           const to = this.scene.getNode(op.edge.to.nodeId);
           if (!from || !to) break;
           // 单入端口替换语义（与服务端一致）
-          const targetPort = to.ports.inputs.find((p) => p.id === op.edge.to.portId);
+          const targetPort = to.ports.inputs.find(
+            (p) => p.id === op.edge.to.portId,
+          );
           if (targetPort && !targetPort.multiple) {
             for (const e of this.scene.upstreamOf(to.id)) {
-              if (e.to.portId === op.edge.to.portId) this.scene.removeEdge(e.id);
+              if (e.to.portId === op.edge.to.portId)
+                this.scene.removeEdge(e.id);
             }
           }
           this.scene.addEdge(op.edge);
           break;
         }
-        case 'remove_edge':
+        case "remove_edge":
           this.scene.removeEdge(op.id);
           break;
-        case 'group': {
+        case "group": {
           for (const id of op.nodeIds) {
             const n = this.scene.getNode(id);
             if (n) this.scene.updateNode({ ...n, parentId: op.groupId });
           }
           break;
         }
-        case 'ungroup': {
+        case "ungroup": {
           for (const n of this.scene.childrenOf(op.groupId)) {
             this.scene.updateNode({ ...n, parentId: undefined });
           }
           break;
         }
-        case 'set_parent': {
+        case "set_parent": {
           const n = this.scene.getNode(op.id);
           if (n) this.scene.updateNode({ ...n, parentId: op.parentId });
           break;
         }
-        case 'set_viewport':
+        case "set_viewport":
           this.viewport.set(op.viewport);
           this.notifyViewport();
           break;
-        case 'set_settings':
-          this.doc = { ...this.doc, settings: { ...this.doc.settings, ...op.settings } };
+        case "set_settings":
+          this.doc = {
+            ...this.doc,
+            settings: { ...this.doc.settings, ...op.settings },
+          };
           break;
         default:
           break;
@@ -451,11 +502,11 @@ export class CanvasKernel {
         nodes.set(id, { ...n, spec: { ...n.spec } });
       }
     };
-    if (cmd.type === 'move-nodes') for (const id of cmd.ids) capture(id);
-    if (cmd.type === 'resize-node') capture(cmd.id);
-    if (cmd.type === 'rename') capture(cmd.id);
-    if (cmd.type === 'set-spec') capture(cmd.id);
-    if (cmd.type === 'delete-nodes') {
+    if (cmd.type === "move-nodes") for (const id of cmd.ids) capture(id);
+    if (cmd.type === "resize-node") capture(cmd.id);
+    if (cmd.type === "rename") capture(cmd.id);
+    if (cmd.type === "set-spec") capture(cmd.id);
+    if (cmd.type === "delete-nodes") {
       for (const id of cmd.ids) {
         const n = this.scene.getNode(id);
         if (n) removedNodes.push({ ...n, spec: { ...n.spec } });
@@ -468,48 +519,62 @@ export class CanvasKernel {
       viewport: this.viewport.current,
       removedNodes: removedNodes.length ? removedNodes : undefined,
       removedEdges: removedEdges.length ? removedEdges : undefined,
-      prevViewport: cmd.type === 'set-viewport' ? this.viewport.current : undefined,
+      prevViewport:
+        cmd.type === "set-viewport" ? this.viewport.current : undefined,
     };
   }
 
   private invertOf(
     cmd: Command,
-    before: ReturnType<CanvasKernel['snapshotFor']>,
+    before: ReturnType<CanvasKernel["snapshotFor"]>,
   ): Op[] {
     switch (cmd.type) {
-      case 'move-nodes':
+      case "move-nodes":
         return cmd.ids
-          .map((id) => ({ kind: 'move_node' as const, id, x: before.rectOf(id)?.x ?? 0, y: before.rectOf(id)?.y ?? 0 }))
+          .map((id) => ({
+            kind: "move_node" as const,
+            id,
+            x: before.rectOf(id)?.x ?? 0,
+            y: before.rectOf(id)?.y ?? 0,
+          }))
           .filter((op) => op.x !== undefined);
-      case 'resize-node': {
+      case "resize-node": {
         const r = before.rectOf(cmd.id);
-        return r ? [{ kind: 'resize_node', id: cmd.id, w: r.w, h: r.h }] : [];
+        return r ? [{ kind: "resize_node", id: cmd.id, w: r.w, h: r.h }] : [];
       }
-      case 'rename': {
+      case "rename": {
         const n = before.nodeOf(cmd.id);
-        return n ? [{ kind: 'set_title', id: cmd.id, title: n.title }] : [];
+        return n ? [{ kind: "set_title", id: cmd.id, title: n.title }] : [];
       }
-      case 'set-spec': {
+      case "set-spec": {
         const n = before.nodeOf(cmd.id);
         if (!n) return [];
         const patch: Record<string, unknown> = {};
         const unset: string[] = [];
         for (const k of cmd.unset ?? []) patch[k] = n.spec[k];
         for (const k of Object.keys(cmd.patch ?? {})) unset.push(k);
-        return [{ kind: 'set_spec', id: cmd.id, patch, unset }];
+        return [{ kind: "set_spec", id: cmd.id, patch, unset }];
       }
-      case 'add-node':
-        return [{ kind: 'remove_node', id: cmd.node.id, cascade: true }];
-      case 'connect':
-        return [{ kind: 'remove_edge', id: cmd.edge.id }];
-      case 'disconnect':
+      case "add-node":
+        return [{ kind: "remove_node", id: cmd.node.id, cascade: true }];
+      case "connect":
+        return [{ kind: "remove_edge", id: cmd.edge.id }];
+      case "disconnect":
         return [];
-      case 'group':
-        return cmd.nodeIds.map((id) => ({ kind: 'set_parent' as const, id, parentId: undefined }));
-      case 'ungroup':
-        return this.scene.childrenOf(cmd.groupId).map((n) => ({ kind: 'set_parent' as const, id: n.id, parentId: cmd.groupId }));
-      case 'set-viewport':
-        return [{ kind: 'set_viewport', viewport: before.viewport }];
+      case "group":
+        return cmd.nodeIds.map((id) => ({
+          kind: "set_parent" as const,
+          id,
+          parentId: undefined,
+        }));
+      case "ungroup":
+        return this.scene.childrenOf(cmd.groupId).map((n) => ({
+          kind: "set_parent" as const,
+          id: n.id,
+          parentId: cmd.groupId,
+        }));
+      case "set-viewport":
+        return [{ kind: "set_viewport", viewport: before.viewport }];
       default:
         return [];
     }
@@ -528,20 +593,29 @@ export class CanvasKernel {
     shiftKey: boolean;
     altKey: boolean;
     target?: { tagName?: string; isContentEditable?: boolean };
-  }): 'undo' | 'redo' | 'select-all' | 'delete' | 'escape' | 'copy' | 'paste' | null {
+  }):
+    | "undo"
+    | "redo"
+    | "select-all"
+    | "delete"
+    | "escape"
+    | "copy"
+    | "paste"
+    | null {
     // 中文输入 / 编辑态不触发快捷键（11 §2.9）
     const tag = e.target?.tagName?.toLowerCase();
-    if (e.target?.isContentEditable || tag === 'input' || tag === 'textarea') return null;
+    if (e.target?.isContentEditable || tag === "input" || tag === "textarea")
+      return null;
     const mod = e.ctrlKey || e.metaKey;
-    if (!mod && e.key === 'Escape') return 'escape';
-    if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) return 'delete';
+    if (!mod && e.key === "Escape") return "escape";
+    if (!mod && (e.key === "Delete" || e.key === "Backspace")) return "delete";
     if (!mod) return null;
     const k = e.key.toLowerCase();
-    if (k === 'z' && !e.shiftKey) return 'undo';
-    if ((k === 'z' && e.shiftKey) || k === 'y') return 'redo';
-    if (k === 'a') return 'select-all';
-    if (k === 'c') return 'copy';
-    if (k === 'v') return 'paste';
+    if (k === "z" && !e.shiftKey) return "undo";
+    if ((k === "z" && e.shiftKey) || k === "y") return "redo";
+    if (k === "a") return "select-all";
+    if (k === "c") return "copy";
+    if (k === "v") return "paste";
     return null;
   }
 

@@ -1,8 +1,12 @@
-import type { Rect, Vec2 } from './types';
-
+import type { Rect, Vec2 } from "./types";
 
 export function rectsIntersect(a: Rect, b: Rect): boolean {
-  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+  return !(
+    a.x + a.w < b.x ||
+    b.x + b.w < a.x ||
+    a.y + a.h < b.y ||
+    b.y + b.h < a.y
+  );
 }
 
 export function rectContains(outer: Rect, inner: Rect): boolean {
@@ -54,17 +58,31 @@ export function snapToGrid(v: number, step = 16): number {
  * 但 `includes('e')` 会误匹配 'ne'/'se'（正确）却与 'w' 组合时语义混淆。
  * 这里按字面量显式映射，杜绝歧义。
  */
-export function handleDirections(handle: ResizeHandle): { n: boolean; s: boolean; e: boolean; w: boolean } {
+export function handleDirections(handle: ResizeHandle): {
+  n: boolean;
+  s: boolean;
+  e: boolean;
+  w: boolean;
+} {
   switch (handle) {
-    case 'n': return { n: true, s: false, e: false, w: false };
-    case 's': return { n: false, s: true, e: false, w: false };
-    case 'e': return { n: false, s: false, e: true, w: false };
-    case 'w': return { n: false, s: false, e: false, w: true };
-    case 'nw': return { n: true, s: false, e: false, w: true };
-    case 'ne': return { n: true, s: false, e: true, w: false };
-    case 'sw': return { n: false, s: true, e: false, w: true };
-    case 'se': return { n: false, s: true, e: true, w: false };
-    default: return { n: false, s: false, e: false, w: false };
+    case "n":
+      return { n: true, s: false, e: false, w: false };
+    case "s":
+      return { n: false, s: true, e: false, w: false };
+    case "e":
+      return { n: false, s: false, e: true, w: false };
+    case "w":
+      return { n: false, s: false, e: false, w: true };
+    case "nw":
+      return { n: true, s: false, e: false, w: true };
+    case "ne":
+      return { n: true, s: false, e: true, w: false };
+    case "sw":
+      return { n: false, s: true, e: false, w: true };
+    case "se":
+      return { n: false, s: true, e: true, w: false };
+    default:
+      return { n: false, s: false, e: false, w: false };
   }
 }
 
@@ -82,13 +100,26 @@ export function keepAspectHeight(rect: Rect, newW: number): number {
  * 八向缩放手柄命中测试与目标矩形计算。
  * 手柄顺序：nw, n, ne, e, se, s, sw, w（与原项目一致）。
  */
-export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
-export const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+export const RESIZE_HANDLES: ResizeHandle[] = [
+  "nw",
+  "n",
+  "ne",
+  "e",
+  "se",
+  "s",
+  "sw",
+  "w",
+];
 
 const HANDLE_SIZE = 10;
 
-export function hitResizeHandle(point: Vec2, screenRect: Rect, handleSize = HANDLE_SIZE): ResizeHandle | null {
+export function hitResizeHandle(
+  point: Vec2,
+  screenRect: Rect,
+  handleSize = HANDLE_SIZE,
+): ResizeHandle | null {
   const hs = handleSize;
   const centers: Record<ResizeHandle, Vec2> = {
     nw: { x: screenRect.x, y: screenRect.y },
@@ -103,7 +134,8 @@ export function hitResizeHandle(point: Vec2, screenRect: Rect, handleSize = HAND
   for (const h of RESIZE_HANDLES) {
     const c = centers[h];
     const half = hs / 2;
-    if (Math.abs(point.x - c.x) <= half && Math.abs(point.y - c.y) <= half) return h;
+    if (Math.abs(point.x - c.x) <= half && Math.abs(point.y - c.y) <= half)
+      return h;
   }
   return null;
 }

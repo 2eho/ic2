@@ -1,26 +1,37 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api, ApiFailure, connectCanvasEvents, isRetryable, newIdempotencyKey } from '@/shared/api';
-import { CanvasKernel } from './kernel';
-import { CanvasSurface } from './components/CanvasSurface';
-import { CanvasToolbar } from './components/CanvasToolbar';
-import { SidePanel } from './components/SidePanel';
-import { RunPanel } from './components/RunPanel';
-import { AgentSidebar } from '@/features/agent/AgentSidebar';
-import { CanvasTopBar } from './components/CanvasTopBar';
-import type { TFn } from '@/app/App';
-import type { Locale } from '@/shared/i18n';
-import { useCanvasSync } from './store/useCanvasSync';
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import {
+  api,
+  ApiFailure,
+  connectCanvasEvents,
+  isRetryable,
+  newIdempotencyKey,
+} from "@/shared/api";
+import { CanvasKernel } from "./kernel";
+import { CanvasSurface } from "./components/CanvasSurface";
+import { CanvasToolbar } from "./components/CanvasToolbar";
+import { SidePanel } from "./components/SidePanel";
+import { RunPanel } from "./components/RunPanel";
+import { AgentSidebar } from "@/features/agent/AgentSidebar";
+import { CanvasTopBar } from "./components/CanvasTopBar";
+import type { TFn } from "@/app/App";
+import type { Locale } from "@/shared/i18n";
+import { useCanvasSync } from "./store/useCanvasSync";
 
-type SyncState = 'idle' | 'syncing' | 'error' | 'conflict' | 'offline';
+type SyncState = "idle" | "syncing" | "error" | "conflict" | "offline";
 
 export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
-  const { canvasId = '' } = useParams();
-  const docQuery = useQuery({ queryKey: ['canvas', canvasId], queryFn: () => api.getCanvas(canvasId) });
+  const { canvasId = "" } = useParams();
+  const docQuery = useQuery({
+    queryKey: ["canvas", canvasId],
+    queryFn: () => api.getCanvas(canvasId),
+  });
   const [kernel, setKernel] = useState<CanvasKernel | null>(null);
-  const [syncState, setSyncState] = useState<SyncState>('idle');
-  const [sidePanel, setSidePanel] = useState<'nodes' | 'assets' | 'prompts'>('nodes');
+  const [syncState, setSyncState] = useState<SyncState>("idle");
+  const [sidePanel, setSidePanel] = useState<"nodes" | "assets" | "prompts">(
+    "nodes",
+  );
   const [showRuns, setShowRuns] = useState(false);
   const [showAgent, setShowAgent] = useState(false);
   const [runTick, setRunTick] = useState(0);
@@ -42,10 +53,11 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
         if (!ev.op) return;
         // 本端提交的回声按 actor 忽略（服务端会带上 actorId）
         sync.applyRemoteOp(ev.actor, ev.op as never);
-        if (ev.type === 'run.step' || ev.type === 'run.step.delta') setRunTick((n) => n + 1);
+        if (ev.type === "run.step" || ev.type === "run.step.delta")
+          setRunTick((n) => n + 1);
       },
-      onReconnect: () => setSyncState('idle'),
-      onError: () => setSyncState('offline'),
+      onReconnect: () => setSyncState("idle"),
+      onError: () => setSyncState("offline"),
     });
     return () => conn.disconnect();
   }, [kernel, canvasId, sync]);
@@ -65,46 +77,60 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
       if (!action) return;
       e.preventDefault();
       switch (action) {
-        case 'undo':
+        case "undo":
           if (kernel.undoOnce()) sync.flush();
           break;
-        case 'redo':
+        case "redo":
           if (kernel.redoOnce()) sync.flush();
           break;
-        case 'select-all':
-          kernel.setSelection({ nodes: kernel.scene.allNodes().map((n) => n.id), edges: [] });
+        case "select-all":
+          kernel.setSelection({
+            nodes: kernel.scene.allNodes().map((n) => n.id),
+            edges: [],
+          });
           break;
-        case 'delete':
+        case "delete":
           if (kernel.currentSelection.nodes.length) {
-            kernel.dispatch({ type: 'delete-nodes', ids: kernel.currentSelection.nodes });
+            kernel.dispatch({
+              type: "delete-nodes",
+              ids: kernel.currentSelection.nodes,
+            });
             sync.flush();
           }
           break;
-        case 'escape':
+        case "escape":
           kernel.setSelection({ nodes: [], edges: [] });
           break;
         default:
           break;
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [kernel, sync]);
 
   // 冲突 / 错误提示
   useMemo(() => {
-    if (sync.conflictDoc) setSyncState('conflict');
+    if (sync.conflictDoc) setSyncState("conflict");
   }, [sync.conflictDoc]);
 
-  if (docQuery.isLoading) return <div className="ic-empty">{t('common.loading')}</div>;
+  if (docQuery.isLoading)
+    return <div className="ic-empty">{t("common.loading")}</div>;
   if (docQuery.error) {
     const err = docQuery.error as ApiFailure;
     return <div className="ic-empty">{t(`errors.${err.code}`)}</div>;
   }
-  if (!kernel) return <div className="ic-empty">{t('common.loading')}</div>;
+  if (!kernel) return <div className="ic-empty">{t("common.loading")}</div>;
 
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <CanvasTopBar
         t={t}
         kernel={kernel}
@@ -114,7 +140,7 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
         onToggleAgent={() => setShowAgent((v) => !v)}
         onSaveViewport={() => sync.flushViewport()}
       />
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <SidePanel
           t={t}
           locale={locale}
@@ -124,7 +150,9 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
           onLocate={(nodeId) => {
             const n = kernel.scene.getNode(nodeId);
             if (!n) return;
-            const host = document.querySelector('[data-canvas-host]') as HTMLElement | null;
+            const host = document.querySelector(
+              "[data-canvas-host]",
+            ) as HTMLElement | null;
             const rect = host?.getBoundingClientRect();
             kernel.viewport.focusRect(n.rect, {
               x: rect?.width ?? window.innerWidth,
@@ -132,7 +160,7 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
             });
           }}
         />
-        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <CanvasSurface
             t={t}
             kernel={kernel}
@@ -143,7 +171,7 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
                 setShowRuns(true);
                 setRunTick((n) => n + 1);
               } catch (e) {
-                if (isRetryable(e)) setSyncState('error');
+                if (isRetryable(e)) setSyncState("error");
               }
             }}
           />
@@ -152,7 +180,9 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
             kernel={kernel}
             onCommit={() => sync.flush()}
             onCreateNode={(type) => {
-              const host = document.querySelector('[data-canvas-host]') as HTMLElement | null;
+              const host = document.querySelector(
+                "[data-canvas-host]",
+              ) as HTMLElement | null;
               const rect = host?.getBoundingClientRect();
               const center = kernel.viewport.toWorld({
                 x: (rect?.width ?? 800) / 2,
@@ -163,7 +193,11 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
             }}
           />
           {showAgent && (
-            <AgentSidebar t={t} canvasId={canvasId} onClose={() => setShowAgent(false)} />
+            <AgentSidebar
+              t={t}
+              canvasId={canvasId}
+              onClose={() => setShowAgent(false)}
+            />
           )}
           {showRuns && (
             <RunPanel
@@ -172,7 +206,11 @@ export function CanvasPage({ t, locale }: { t: TFn; locale: Locale }) {
               tick={runTick}
               onClose={() => setShowRuns(false)}
               onUseResult={(nodeId, assetId) => {
-                kernel.dispatch({ type: 'set-spec', id: nodeId, patch: { assetId } });
+                kernel.dispatch({
+                  type: "set-spec",
+                  id: nodeId,
+                  patch: { assetId },
+                });
                 sync.flush();
               }}
             />

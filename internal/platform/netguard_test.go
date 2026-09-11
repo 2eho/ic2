@@ -6,7 +6,10 @@ import (
 )
 
 // ATK-04：Base URL = http://169.254.169.254 必须被拒绝，code=ssrf_blocked。
-func TestSSRFBlocksMetadataAndPrivate(t *testing.T) {
+// ATK-04：Base URL = http://169.254.169.254（云元数据）必须被拒绝，code=ssrf_blocked。
+// 这是最经典也最致命的 SSRF 目标：一次命中就能拿到实例的临时凭据。
+// 除元数据地址外，这里还覆盖了回环、私网、IPv6 回环与主流厂商的元数据端点。
+func TestATK04SSRFBlocksMetadataAndPrivate(t *testing.T) {
 	g := NewNetGuard()
 	blocked := []string{
 		"http://169.254.169.254/latest/meta-data/",

@@ -312,3 +312,22 @@ func IsNotFound(err error) bool {
 	}
 	return false
 }
+
+// WorkspaceOf 反查画布所属工作区（供授权使用）。
+func (s *Service) WorkspaceOf(ctx context.Context, canvasID string) (string, error) {
+	if !ValidID(canvasID) {
+		return "", platform.ErrNotFound("canvas")
+	}
+	type resolver interface {
+		WorkspaceOf(ctx context.Context, canvasID string) (string, error)
+	}
+	if r, ok := s.store.(resolver); ok {
+		return r.WorkspaceOf(ctx, canvasID)
+	}
+	return "", platform.NewError(501, platform.CodeNotImplemented, "store does not support workspace lookup")
+}
+
+// 编译期断言：SQLStore 必须实现 WorkspaceOf（授权路径依赖它）。
+var _ interface {
+	WorkspaceOf(ctx context.Context, canvasID string) (string, error)
+} = (*SQLStore)(nil)

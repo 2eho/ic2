@@ -23,8 +23,9 @@ export interface Viewport {
   k: number;
 }
 
-export type NodeState = 'idle' | 'pending' | 'running' | 'succeeded' | 'failed';
-export type ResourceKind = 'text' | 'image' | 'video' | 'audio' | 'file' | 'json';
+export type NodeState = "idle" | "pending" | "running" | "succeeded" | "failed";
+export type ResourceKind =
+  "text" | "image" | "video" | "audio" | "file" | "json";
 
 export interface Port {
   id: string;
@@ -41,7 +42,13 @@ export interface Ports {
 }
 
 export interface NodeResult {
-  variants?: { assetId?: string; text?: string; kind: ResourceKind; status: NodeState; error?: string }[];
+  variants?: {
+    assetId?: string;
+    text?: string;
+    kind: ResourceKind;
+    status: NodeState;
+    error?: string;
+  }[];
   primary: number;
   runId?: string;
   stepId?: string;
@@ -72,7 +79,7 @@ export interface RawEdge {
 }
 
 export interface CanvasSettings {
-  background: 'lines' | 'dots' | 'blank';
+  background: "lines" | "dots" | "blank";
   imageInfo: boolean;
   gridSnap: boolean;
   readOnly: boolean;
@@ -92,31 +99,54 @@ export interface CanvasDoc {
 
 /** 内核 op：与服务端 internal/graph/op.go 一一对应（同源语义）。 */
 export type Op =
-  | { kind: 'add_node'; node: RawNode }
-  | { kind: 'remove_node'; id: string; cascade?: boolean }
-  | { kind: 'move_node'; id: string; x: number; y: number; delta?: boolean }
-  | { kind: 'resize_node'; id: string; w: number; h: number; keepAspect?: boolean }
-  | { kind: 'set_title'; id: string; title: string }
-  | { kind: 'set_spec'; id: string; patch?: Record<string, unknown>; unset?: string[] }
-  | { kind: 'set_state'; id: string; state: NodeState; result?: NodeResult; error?: { code: string; message: string } }
-  | { kind: 'add_edge'; edge: RawEdge }
-  | { kind: 'remove_edge'; id: string }
-  | { kind: 'group'; nodeIds: string[]; groupId: string; title?: string; rect?: Rect }
-  | { kind: 'ungroup'; groupId: string; keepChildren?: boolean }
-  | { kind: 'set_viewport'; viewport: Viewport }
-  | { kind: 'set_settings'; settings: Partial<CanvasSettings> }
-  | { kind: 'set_parent'; id: string; parentId?: string };
+  | { kind: "add_node"; node: RawNode }
+  | { kind: "remove_node"; id: string; cascade?: boolean }
+  | { kind: "move_node"; id: string; x: number; y: number; delta?: boolean }
+  | {
+      kind: "resize_node";
+      id: string;
+      w: number;
+      h: number;
+      keepAspect?: boolean;
+    }
+  | { kind: "set_title"; id: string; title: string }
+  | {
+      kind: "set_spec";
+      id: string;
+      patch?: Record<string, unknown>;
+      unset?: string[];
+    }
+  | {
+      kind: "set_state";
+      id: string;
+      state: NodeState;
+      result?: NodeResult;
+      error?: { code: string; message: string };
+    }
+  | { kind: "add_edge"; edge: RawEdge }
+  | { kind: "remove_edge"; id: string }
+  | {
+      kind: "group";
+      nodeIds: string[];
+      groupId: string;
+      title?: string;
+      rect?: Rect;
+    }
+  | { kind: "ungroup"; groupId: string; keepChildren?: boolean }
+  | { kind: "set_viewport"; viewport: Viewport }
+  | { kind: "set_settings"; settings: Partial<CanvasSettings> }
+  | { kind: "set_parent"; id: string; parentId?: string };
 
 /** 交互状态机的状态（显式枚举，替代散落的 if (dragging && ...)）。 */
 export type InteractionState =
-  | 'idle'
-  | 'panning'
-  | 'marquee'
-  | 'dragging-node'
-  | 'resizing-node'
-  | 'connecting'
-  | 'editing-text'
-  | 'plugin-interacting';
+  | "idle"
+  | "panning"
+  | "marquee"
+  | "dragging-node"
+  | "resizing-node"
+  | "connecting"
+  | "editing-text"
+  | "plugin-interacting";
 
 export interface Selection {
   nodes: string[];

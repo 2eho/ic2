@@ -1,6 +1,12 @@
 /** 前端侧 DTO 类型。真源为 contracts/openapi.yaml，本文件由 make gen 校验同步。 */
 export interface MetaResponse {
-  build: { version: string; commit: string; date: string; goVersion: string; mode: string };
+  build: {
+    version: string;
+    commit: string;
+    date: string;
+    goVersion: string;
+    mode: string;
+  };
   features: Record<string, boolean>;
   limits: Record<string, unknown>;
   time: string;
@@ -17,7 +23,7 @@ export interface Workspace {
   id: string;
   name: string;
   slug: string;
-  role: 'owner' | 'admin' | 'editor' | 'viewer';
+  role: "owner" | "admin" | "editor" | "viewer";
   plan: string;
 }
 
@@ -54,13 +60,13 @@ export interface AppendOpsResult {
   warnings?: string[];
   rebased?: boolean;
   inverse?: unknown[];
-  document?: import('@/features/canvas/kernel/types').CanvasDoc;
+  document?: import("@/features/canvas/kernel/types").CanvasDoc;
 }
 
 export interface Asset {
   id: string;
   workspaceId: string;
-  kind: 'image' | 'video' | 'audio' | 'text' | 'json' | 'file';
+  kind: "image" | "video" | "audio" | "text" | "json" | "file";
   hash: string;
   size: number;
   mime: string;
@@ -81,7 +87,14 @@ export interface Usage {
 }
 
 export type StepStatus =
-  | 'pending' | 'ready' | 'running' | 'retrying' | 'succeeded' | 'failed' | 'skipped' | 'canceled';
+  | "pending"
+  | "ready"
+  | "running"
+  | "retrying"
+  | "succeeded"
+  | "failed"
+  | "skipped"
+  | "canceled";
 
 export interface RunError {
   code: string;
@@ -117,7 +130,8 @@ export interface RunStep {
   finishedAt?: string;
 }
 
-export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'partial';
+export type RunStatus =
+  "pending" | "running" | "succeeded" | "failed" | "canceled" | "partial";
 
 export interface Run {
   id: string;

@@ -1,4 +1,4 @@
-import type { Rect, Vec2, Viewport } from './types';
+import type { Rect, Vec2, Viewport } from "./types";
 
 /** 与 internal/graph/limits.go 保持一致（边界唯一真源在服务端，前端做前置校验）。 */
 export const ZOOM_MIN = 0.05;
@@ -20,7 +20,9 @@ export function isValidRect(r: Rect): boolean {
     if (!Number.isFinite(n)) return false;
   }
   if (Math.abs(r.x) > COORD_LIMIT || Math.abs(r.y) > COORD_LIMIT) return false;
-  return r.w >= SIZE_MIN && r.w <= SIZE_MAX && r.h >= SIZE_MIN && r.h <= SIZE_MAX;
+  return (
+    r.w >= SIZE_MIN && r.w <= SIZE_MAX && r.h >= SIZE_MIN && r.h <= SIZE_MAX
+  );
 }
 
 /** 把缩放约束到合法区间；非有限值返回 1（默认视角）。 */
@@ -53,7 +55,10 @@ export class ViewportController {
 
   /** 屏幕坐标 → 世界坐标 */
   toWorld(p: Vec2): Vec2 {
-    return { x: (p.x - this.vp.x) / this.vp.k, y: (p.y - this.vp.y) / this.vp.k };
+    return {
+      x: (p.x - this.vp.x) / this.vp.k,
+      y: (p.y - this.vp.y) / this.vp.k,
+    };
   }
 
   /** 世界坐标 → 屏幕坐标 */
@@ -123,7 +128,10 @@ export class ViewportController {
     const w = Math.max(1, maxX - minX);
     const h = Math.max(1, maxY - minY);
     const k = clampZoom(
-      Math.min((viewportSize.x - padding * 2) / w, (viewportSize.y - padding * 2) / h),
+      Math.min(
+        (viewportSize.x - padding * 2) / w,
+        (viewportSize.y - padding * 2) / h,
+      ),
     );
     this.vp = {
       k,
@@ -134,7 +142,11 @@ export class ViewportController {
   }
 
   /** 动画聚焦到某节点（对齐原项目 450ms easeOutCubic）。 */
-  focusRect(target: Rect, viewportSize: Vec2, scale = Math.min(1.6, ZOOM_MAX)): Viewport {
+  focusRect(
+    target: Rect,
+    viewportSize: Vec2,
+    scale = Math.min(1.6, ZOOM_MAX),
+  ): Viewport {
     const k = clampZoom(scale);
     this.vp = {
       k,
@@ -153,7 +165,10 @@ export class ViewportController {
   /** 可视区域的世界坐标包围盒（用于视口裁剪） */
   visibleWorldRect(viewportSize: Vec2, padding = 0): Rect {
     const tl = this.toWorld({ x: -padding, y: -padding });
-    const br = this.toWorld({ x: viewportSize.x + padding, y: viewportSize.y + padding });
+    const br = this.toWorld({
+      x: viewportSize.x + padding,
+      y: viewportSize.y + padding,
+    });
     return { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
   }
 }
