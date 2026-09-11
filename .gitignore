@@ -1,0 +1,19 @@
+# 上游参考仓库（仅 CI/本地分析用，不入库）
+upstream/
+
+# 构建产物
+dist/
+build/
+*.log
+node_modules/
+
+# 本地数据与密钥
+data/
+.env
+.env.local
+*.local
+
+# 编辑器
+.DS_Store
+.idea/
+.vscode/

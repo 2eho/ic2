@@ -1,0 +1,55 @@
+# 上游同步巡检：拉取参考项目 infinite-canvas 的「契约面」变化，产出差异报告。
+# 设计说明：docs/design/12-legacy-and-upstream.md
+#
+# 定位：只产出报告与待办，不自动改重写代码。
+# 定时触发放在默认分支；手动触发用于按需巡检。
+
+# 只读巡检，不发布制品；用最小权限
+main:
+  # 每周一 03:00（UTC）巡检一次上游
+  "crontab: 0 3 * * 1":
+    - name: upstream-watch
+      docker:
+        image: node:22
+      env:
+        UPSTREAM_REPO: https://github.com/basketikun/infinite-canvas.git
+        UPSTREAM_REF: main
+      stages:
+        - name: 抽取上游契约面变化
+          # 无变化时脚本以 0 退出；有变化时产出 change-report.json 供人处理。
+          script: |
+            set -euo pipefail
+            git --version
+            bash scripts/upstream-sync.sh || true
+            echo "---- change-report 摘要 ----"
+            node -e "
+              const fs = require('fs');
+              const p = 'upstream/change-report.json';
+              if (!fs.existsSync(p)) { console.log('无报告（上游未变化）'); process.exit(0); }
+              const r = JSON.parse(fs.readFileSync(p, 'utf8'));
+              console.log('verdict:', r.verdict);
+              console.log('from   :', r.from.version, r.from.commit);
+              console.log('to     :', r.to.version, r.to.commit);
+              const probes = r.probes || {};
+              for (const key of Object.keys(probes)) {
+                const value = probes[key];
+                if (Array.isArray(value) && value.length) console.log(key, '=>', value.slice(0, 20));
+                else if (key === 'limitsChanged' && Array.isArray(value) && value.length) console.log(key, '=>', value);
+              }
+            "
+
+$:
+  # 手动触发入口：需要立即巡检时使用
+  web_trigger_upstream:
+    - name: upstream-watch-manual
+      docker:
+        image: node:22
+      env:
+        UPSTREAM_REPO: https://github.com/basketikun/infinite-canvas.git
+        UPSTREAM_REF: main
+      stages:
+        - name: 抽取上游契约面变化
+          script: |
+            set -euo pipefail
+            bash scripts/upstream-sync.sh || true
+            test -f upstream/change-report.json && cat upstream/change-report.json || echo "上游未变化"
