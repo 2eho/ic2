@@ -2,18 +2,30 @@
 upstream/
 
 # 构建产物
+bin/
 dist/
 build/
 *.log
+coverage.out
 node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
 
 # 本地数据与密钥
 data/
 .env
 .env.local
 *.local
+*.db
+*.db-shm
+*.db-wal
 
 # 编辑器
 .DS_Store
 .idea/
 .vscode/
+
+# pnpm 本地存储与缓存
+.pnpm-store/
+.pnpm-cache/
