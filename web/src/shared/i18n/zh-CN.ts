@@ -268,6 +268,11 @@ export const zhCN = {
     not_implemented: '该功能尚未实现',
     plugin_permission_denied: '插件权限不足',
   },
-} as const;
+};
 
-export type Dict = typeof zhCN;
+/** 文案字典的形状：所有叶子为 string，避免 `as const` 把类型收窄成字面量。 */
+export type Dict = DeepStrings<typeof zhCN>;
+
+type DeepStrings<T> = {
+  [K in keyof T]: T[K] extends string ? string : DeepStrings<T[K]>;
+};

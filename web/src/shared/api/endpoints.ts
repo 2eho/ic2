@@ -25,6 +25,7 @@ export const api = {
   createProject: (wid: string, name: string, description = '') =>
     request<Project>(`/api/v1/workspaces/${wid}/projects`, { body: { name, description } }),
 
+  listCanvases: (pid: string) => request<{ items: CanvasMeta[] }>(`/api/v1/projects/${pid}/canvases`),
   createCanvas: (pid: string, name: string) =>
     request<{ canvas: CanvasMeta }>(`/api/v1/projects/${pid}/canvases`, { body: { name } }),
   getCanvas: (cid: string) => request<CanvasDoc>(`/api/v1/canvases/${cid}`),

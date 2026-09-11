@@ -1,10 +1,11 @@
 import { SceneGraph } from './scene';
 import { ViewportController } from './viewport';
 import { UndoStack, type UndoEntry } from './undo';
-import { InteractionMachine, type Intent, type Modifiers } from './interaction';
+import { InteractionMachine, type Intent } from './interaction';
 import { coalesceOps, commandToOps, type Command } from './commands';
 import type { CanvasDoc, Op, RawEdge, RawNode, Rect, Selection, Vec2, Viewport } from './types';
 import { applyResize } from './geometry';
+import { defaultSchemaFor, newLocalID } from './schema';
 
 /**
  * 内核门面：把视口、场景图、交互状态机、命令总线、undo 组合成单一 API。
@@ -20,6 +21,9 @@ export class CanvasKernel {
   readonly undo = new UndoStack(50);
   readonly interaction = new InteractionMachine();
 
+  /** 本端 actorId：用于忽略自己提交的 SSE 回声。 */
+  readonly localActor: string;
+
   private doc: CanvasDoc;
   private selection: Selection = { nodes: [], edges: [] };
   private pending: Op[] = [];
@@ -27,8 +31,9 @@ export class CanvasKernel {
   private viewportListeners = new Set<(v: Viewport) => void>();
   private version: number;
 
-  constructor(doc: CanvasDoc) {
+  constructor(doc: CanvasDoc, localActor = '') {
     this.doc = doc;
+    this.localActor = localActor;
     this.version = doc.version;
     this.viewport.set(doc.viewport);
     this.scene.load(doc.nodes, doc.edges);
@@ -114,6 +119,106 @@ export class CanvasKernel {
     return ops;
   }
 
+  /**
+   * 应用远端 op（来自 SSE）。与本地路径完全同源，因此不存在「某条路径绕过校验」。
+   * 注意：远端 op 不进 undo 栈（撤销只针对自己的操作）。
+   */
+  applyRemote(op: Op): void {
+    this.applyLocal([op]);
+    // 版本由 SSE 载荷推进；此处只保证本地视图一致。
+    this.notify();
+  }
+
+  /**
+   * 按类型创建节点（默认位置由调用方给出世界坐标）。
+   * 端口与默认 spec 从内置 schema 表推导，保证与服务端一致。
+   */
+  createNode(type: string, worldPos: Vec2): RawNode | null {
+    const schema = defaultSchemaFor(type);
+    if (!schema) return null;
+    const id = newLocalID(type);
+    const node: RawNode = {
+      id,
+      type,
+      title: schema.title,
+      rect: { x: Math.round(worldPos.x), y: Math.round(worldPos.y), w: schema.w, h: schema.h },
+      z: this.nextZ(),
+      ports: schema.ports,
+      spec: { ...schema.spec },
+      state: 'idle',
+    };
+    this.dispatch({ type: 'add-node', node });
+    this.selection = { nodes: [id], edges: [] };
+    return node;
+  }
+
+  /** 创建连线（含端口类型校验与单入端口替换，语义与服务端一致）。 */
+  createEdge(fromNode: string, fromPort: string, toNode: string, toPort: string): RawEdge | null {
+    const a = this.scene.getNode(fromNode);
+    const b = this.scene.getNode(toNode);
+    if (!a || !b || fromNode === toNode) return null;
+    const out = a.ports.outputs.find((p) => p.id === fromPort);
+    const inp = b.ports.inputs.find((p) => p.id === toPort);
+    if (!out || !inp || out.kind !== inp.kind) return null;
+    const edge: RawEdge = {
+      id: newLocalID('e'),
+      from: { nodeId: fromNode, portId: fromPort },
+      to: { nodeId: toNode, portId: toPort },
+      kind: out.kind,
+      createdAt: new Date().toISOString(),
+    };
+    this.dispatch({ type: 'connect', edge });
+    return edge;
+  }
+
+  private nextZ(): number {
+    let max = 0;
+    for (const n of this.scene.allNodes()) {
+      if (n.z > max) max = n.z;
+    }
+    return max + 1;
+  }
+
+  /** 复制选中节点（含内部连线），返回新节点 ID 映射（对齐原项目复制粘贴语义）。 */
+  duplicateNodes(ids: string[], offset = 24): Record<string, string> {
+    const idMap: Record<string, string> = {};
+    const nodes = ids.map((id) => this.scene.getNode(id)).filter((n): n is RawNode => Boolean(n));
+    for (const n of nodes) {
+      const newId = newLocalID(n.type === 'group' ? 'grp' : 'n');
+      idMap[n.id] = newId;
+      this.dispatch({
+        type: 'add-node',
+        node: {
+          ...n,
+          id: newId,
+          rect: { ...n.rect, x: n.rect.x + offset, y: n.rect.y + offset },
+          z: this.nextZ(),
+          parentId: n.parentId ? idMap[n.parentId] ?? n.parentId : undefined,
+          state: 'idle',
+          result: undefined,
+          error: null,
+        },
+      });
+    }
+    // 复制两端都在选区内的连线
+    for (const e of this.scene.allEdges()) {
+      if (idMap[e.from.nodeId] && idMap[e.to.nodeId]) {
+        this.dispatch({
+          type: 'connect',
+          edge: {
+            id: newLocalID('e'),
+            from: { nodeId: idMap[e.from.nodeId], portId: e.from.portId },
+            to: { nodeId: idMap[e.to.nodeId], portId: e.to.portId },
+            kind: e.kind,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+    this.selection = { nodes: Object.values(idMap), edges: [] };
+    return idMap;
+  }
+
   /** 取出并清空待提交队列（已合并同帧同类 op）。 */
   takePendingOps(): Op[] {
     const ops = coalesceOps(this.pending);
@@ -195,11 +300,24 @@ export class CanvasKernel {
     }
   }
 
+  /** 最近一次指针位置（拖拽 origin 复位与框选用）。 */
   private lastPoint?: Vec2;
+  /** 最近一次 pointerdown 位置（框选起点）。 */
+  lastDownPoint?: Vec2;
 
-  /** 由 React 层在每次 pointermove 时告知当前指针位置（用于拖拽 origin 复位）。 */
+  /** 由 React 层在每次 pointermove 时告知当前指针位置。 */
   notePointer(point: Vec2): void {
+    if (!this.lastPoint || this.interaction.current === 'idle' || this.interaction.current === 'marquee') {
+      if (this.interaction.current === 'marquee' && !this.lastDownPoint) {
+        this.lastDownPoint = point;
+      }
+    }
     this.lastPoint = point;
+  }
+
+  /** 记录 pointerdown 位置（框选起点）。 */
+  noteDown(point: Vec2): void {
+    this.lastDownPoint = point;
   }
 
   /** 本地应用 op（与 internal/graph/op.go 语义保持一致的子集）。 */

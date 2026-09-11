@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -26,6 +27,9 @@ type Deps struct {
 	MCP       MCPService
 	Auth      AuthService
 	Meta      MetaService
+	// StaticFS / StaticDir 用于托管前端产物（为空则纯 API 模式）。
+	StaticFS  fs.FS
+	StaticDir string
 }
 
 // Router 构造 HTTP 路由。
@@ -51,6 +55,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/workspaces/{wid}/projects", h.createProject)
 
 	// 画布
+	mux.HandleFunc("GET /api/v1/projects/{pid}/canvases", h.listCanvases)
 	mux.HandleFunc("POST /api/v1/projects/{pid}/canvases", h.createCanvas)
 	mux.HandleFunc("GET /api/v1/canvases/{cid}", h.getCanvas)
 	mux.HandleFunc("DELETE /api/v1/canvases/{cid}", h.deleteCanvas)
@@ -106,6 +111,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/agent/sessions/{sid}/history", h.agentHistory)
 	mux.HandleFunc("POST /api/v1/agent/tool-results", h.agentToolResult)
 	mux.HandleFunc("POST /api/v1/mcp", h.mcpHTTP)
+
+	// 前端静态产物：仅在构建存在时挂载，否则 API-only 模式
+	if d.StaticFS != nil {
+		mux.Handle("/", StaticHandler(d.StaticFS, d.StaticDir))
+	}
 
 	return chain(mux, d)
 }

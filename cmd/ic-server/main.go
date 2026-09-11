@@ -89,13 +89,21 @@ func build(cfg platform.Config, logger *slog.Logger) (*application, error) {
 
 	authSvc := identity.New(db.DB, clock, ids, cfg)
 
-	mux := api.NewRouter(api.Deps{
+	deps := api.Deps{
 		Config: cfg,
 		Logger: logger,
 		Graph:  graphSvc,
 		Auth:   authSvc,
 		Meta:   &metaSvc{db: db},
-	})
+	}
+	if fsys, dir, ok := api.ResolveStaticDir(cfg.StaticDir); ok {
+		deps.StaticFS = fsys
+		deps.StaticDir = dir
+		logger.Info("已挂载前端静态产物", "dir", dir)
+	} else {
+		logger.Info("未找到前端产物，以纯 API 模式运行（可先执行 make web-build）")
+	}
+	mux := api.NewRouter(deps)
 
 	return &application{
 		cfg:    cfg,

@@ -193,4 +193,9 @@ export class InteractionMachine {
   get spaceHeld(): boolean {
     return this.extraModifier;
   }
+
+  /** 当前正在拖拽的节点（多选联动时由上层使用）。 */
+  get dragging(): string[] {
+    return [...this.draggingIds];
+  }
 }

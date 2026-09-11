@@ -40,6 +40,24 @@ func (h *handlers) createCanvas(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"canvas": meta, "createdBy": p.UserID})
 }
 
+// listCanvases 列出项目下的画布。
+func (h *handlers) listCanvases(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Graph == nil {
+		writeError(w, r, platform.NewError(501, platform.CodeNotImplemented, "graph not configured"))
+		return
+	}
+	if _, err := h.principal(r); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	items, err := h.deps.Graph.List(r.Context(), r.PathValue("pid"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *handlers) getCanvas(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Graph == nil {
 		writeError(w, r, platform.NewError(501, platform.CodeNotImplemented, "graph not configured"))

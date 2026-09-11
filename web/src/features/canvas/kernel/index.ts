@@ -12,3 +12,4 @@ export * from './commands';
 export * from './undo';
 export * from './interaction';
 export { CanvasKernel } from './kernel';
+export * from './schema';
