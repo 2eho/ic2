@@ -49,6 +49,9 @@ export function ContextMenu({
   }, [onClose]);
 
   const node = nodeId ? kernel.scene.getNode(nodeId) : null;
+  // 右键点中的节点已经被选中（CanvasSurface.onContextMenu），
+  // 因此「选中数 > 1」就是「在我右键的节点上，对齐其它一起选中的节点」。
+  const selectionCount = kernel.currentSelection.nodes.length;
 
   return (
     <div
@@ -103,6 +106,41 @@ export function ContextMenu({
                 onClose();
               }}
             />
+          )}
+          {selectionCount > 1 && (
+            <>
+              <MenuItem
+                label={t("canvas.alignLeft")}
+                onClick={() => {
+                  if (kernel.alignSelection(undefined, "left", "first").length)
+                    onCommit();
+                  onClose();
+                }}
+              />
+              <MenuItem
+                label={t("canvas.alignTop")}
+                onClick={() => {
+                  if (kernel.alignSelection(undefined, "top", "first").length)
+                    onCommit();
+                  onClose();
+                }}
+              />
+              <MenuItem
+                label={t("canvas.distributeH")}
+                onClick={() => {
+                  if (kernel.distributeSelection(undefined, "horizontal").length)
+                    onCommit();
+                  onClose();
+                }}
+              />
+              <MenuItem
+                label={t("canvas.layoutLayers")}
+                onClick={() => {
+                  if (kernel.layoutByLayers().length) onCommit();
+                  onClose();
+                }}
+              />
+            </>
           )}
           {node.type === "generation" && (
             <MenuItem

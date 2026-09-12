@@ -6,6 +6,7 @@ import { EdgesLayer } from "./EdgesLayer";
 import { Minimap } from "./Minimap";
 import { ZoomControls } from "./ZoomControls";
 import { ContextMenu } from "./ContextMenu";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { useKernelSelection } from "../hooks/useKernel";
 import { NODE_SCHEMAS } from "../kernel/schema";
 import type { TFn } from "@/app/App";
@@ -148,8 +149,21 @@ export function CanvasSurface({ t, kernel, onCommit, onRun }: Props) {
       modifiers: modifiers(e),
     });
     if (intent.type === "start-drag" || intent.type === "none") {
-      if (hit && !selection.nodes.includes(hit.id)) {
-        kernel.setSelection({ nodes: [hit.id], edges: [] });
+      if (hit) {
+        if (e.shiftKey) {
+          // Shift 点击：未选中 → 追加；已选中 → 反选（与主流画布一致）。
+          // 走内核的 toggleSelection / additive 路径，保证选区语义只有一处真源。
+          if (selection.nodes.includes(hit.id)) {
+            kernel.toggleSelection({ nodes: [hit.id], edges: [] });
+          } else {
+            kernel.setSelection(
+              { nodes: [hit.id], edges: [] },
+              { additive: true },
+            );
+          }
+        } else if (!selection.nodes.includes(hit.id)) {
+          kernel.setSelection({ nodes: [hit.id], edges: [] });
+        }
       }
     }
     kernel.noteDown(screen);
@@ -244,7 +258,8 @@ export function CanvasSurface({ t, kernel, onCommit, onRun }: Props) {
       const hits = kernel.scene
         .hitRect(rectWorld, { skipGroups: true })
         .map((n) => n.id);
-      kernel.setSelection({ nodes: hits, edges: [] });
+      // Shift + 框选：并入既有选区（对等矩阵 3.3「Shift 追加」）。
+      kernel.setSelection({ nodes: hits, edges: [] }, { additive: e.shiftKey });
     }
     setMarquee(null);
     setConnection(null);
@@ -425,6 +440,9 @@ export function CanvasSurface({ t, kernel, onCommit, onRun }: Props) {
           onCommit={onCommit}
         />
       )}
+
+      {/* 3.18 多选工具栏：一键对齐 / 等间距（选中 ≥2 时出现） */}
+      <SelectionToolbar t={t} kernel={kernel} onCommit={onCommit} />
 
       {menu && (
         <ContextMenu

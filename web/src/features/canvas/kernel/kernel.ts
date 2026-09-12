@@ -2,7 +2,12 @@ import { SceneGraph } from "./scene";
 import { ViewportController } from "./viewport";
 import { UndoStack, type UndoEntry } from "./undo";
 import { InteractionMachine, type Intent } from "./interaction";
-import { coalesceOps, commandToOps, type Command } from "./commands";
+import {
+  coalesceOps,
+  commandToOps,
+  offsetsToMoves,
+  type Command,
+} from "./commands";
 import type {
   CanvasDoc,
   Op,
@@ -13,8 +18,28 @@ import type {
   Vec2,
   Viewport,
 } from "./types";
-import { applyResize } from "./geometry";
+import {
+  applyResize,
+  type AlignAnchor,
+  type AlignMode,
+  type AlignRect,
+  type DistributeAxis,
+  type LayeredLayoutOptions,
+} from "./geometry";
 import { defaultSchemaFor, newLocalID } from "./schema";
+import {
+  applyAdditive,
+  toggleSelectionNodes,
+  unionSelection,
+} from "./selection";
+import { applySceneOp } from "./applyOp";
+import {
+  isLayeredSettled,
+  runAlign,
+  runDistribute,
+  runLayeredLayout,
+} from "./layoutOps";
+import type { EdgeLike } from "./layout";
 
 /**
  * 内核门面：把视口、场景图、交互状态机、命令总线、undo 组合成单一 API。
@@ -109,7 +134,12 @@ export class CanvasKernel {
    */
   dispatch(cmd: Command): Op[] {
     if (this.doc.settings.readOnly) return [];
-    const ops = commandToOps(cmd);
+    const ops =
+      cmd.type === "align-nodes" ||
+      cmd.type === "distribute-nodes" ||
+      cmd.type === "layout-layers"
+        ? offsetsToMoves(cmd.offsets, (id) => this.scene.getNode(id)?.rect)
+        : commandToOps(cmd);
     if (ops.length === 0 && cmd.type !== "duplicate-nodes") return [];
 
     const before = this.snapshotFor(cmd);
@@ -244,6 +274,77 @@ export class CanvasKernel {
     return idMap;
   }
 
+  /**
+   * 选中节点的对齐（一键对齐）。`anchor` 默认 `union`（选区包围盒），
+   * 可选 `first`（首元素）。少于 2 个或本来就已经对齐时不产生 op ——
+   * 调用方据此判断「这次点击是不是空操作」，不把无意义 op 发给服务端。
+   * 位移怎么算在 `layout.ts` 纯函数里，这里只负责取数据 + 派发（见 `layoutOps.ts`）。
+   */
+  alignSelection(
+    ids: string[] = this.selection.nodes,
+    mode: AlignMode,
+    anchor: AlignAnchor = "union",
+  ): Op[] {
+    return runAlign(
+      (cmd) => this.dispatch(cmd),
+      this.rectsOf(ids),
+      mode,
+      anchor,
+    );
+  }
+
+  /** 选中节点的等间距分布（需 ≥3 个，按中心等距）。 */
+  distributeSelection(
+    ids: string[] = this.selection.nodes,
+    axis: DistributeAxis,
+  ): Op[] {
+    return runDistribute((cmd) => this.dispatch(cmd), this.rectsOf(ids), axis);
+  }
+
+  /**
+   * 按拓扑层级成列（「每一层在同一列」）：用选区内部的连线算层号，
+   * 同层节点对齐到同一个 x、列内按原顺序铺开（算法见 `layout.ts`）。
+   * 只产出一条 `layout-layers` 命令，一次 Ctrl+Z 可整体还原。
+   */
+  layoutByLayers(
+    ids: string[] = this.selection.nodes,
+    opts: LayeredLayoutOptions = {},
+  ): Op[] {
+    return runLayeredLayout(
+      (cmd) => this.dispatch(cmd),
+      { rects: this.rectsOf(ids), edges: this.edgesLike() },
+      opts,
+    );
+  }
+
+  /** 是否已经按层成列（UI 用于置灰，避免「点了没反应」）。 */
+  isLayeredAlready(
+    ids: string[] = this.selection.nodes,
+    opts: LayeredLayoutOptions = {},
+  ): boolean {
+    return isLayeredSettled(
+      { rects: this.rectsOf(ids), edges: this.edgesLike() },
+      opts,
+    );
+  }
+
+  /** 场景内全部连线（只取两端节点 id），供分层计算使用。 */
+  private edgesLike(): EdgeLike[] {
+    return this.scene
+      .allEdges()
+      .map((e) => ({ from: e.from.nodeId, to: e.to.nodeId }));
+  }
+
+  /** 选中节点矩形（世界坐标），过滤掉已删除 id；用于对齐可用性判断。 */
+  rectsOf(ids: string[] = this.selection.nodes): AlignRect[] {
+    const out: AlignRect[] = [];
+    for (const id of ids) {
+      const n = this.scene.getNode(id);
+      if (n) out.push({ id: n.id, ...n.rect });
+    }
+    return out;
+  }
+
   /** 取出并清空待提交队列（已合并同帧同类 op）。 */
   takePendingOps(): Op[] {
     const ops = coalesceOps(this.pending);
@@ -276,8 +377,21 @@ export class CanvasKernel {
     return true;
   }
 
-  setSelection(sel: Selection): void {
-    this.selection = sel;
+  /**
+   * 设置选区。`additive` 为真时**并入**当前选区（Shift 多选），否则整体替换。
+   * 合并/反选规则在 `selection.ts` 纯函数里，这里只负责写入状态与通知。
+   *
+   * 这条路径曾出现假绿：`handleIntent` 把 `intent.additive` 丢掉，
+   * Shift 点击变成静默覆盖选区（多选堆不出来 → 多选工具栏到不了）。
+   */
+  setSelection(sel: Selection, opts: { additive?: boolean } = {}): void {
+    this.selection = opts.additive ? unionSelection(this.selection, sel) : sel;
+    this.notify();
+  }
+
+  /** Shift 点击已选中的节点 → 取消选中（与主流画布一致的反选语义）。 */
+  toggleSelection(sel: Selection): void {
+    this.selection = toggleSelectionNodes(this.selection, sel);
     this.notify();
   }
 
@@ -296,7 +410,10 @@ export class CanvasKernel {
         return [];
       }
       case "select": {
-        this.selection = intent.selection;
+        // additive 必须真的生效：状态机产出了 `additive`，内核却曾把它丢掉。
+        this.selection = intent.additive
+          ? applyAdditive(this.selection, intent.selection)
+          : intent.selection;
         this.notify();
         return [];
       }
@@ -417,109 +534,11 @@ export class CanvasKernel {
     this.lastDownPoint = point;
   }
 
-  /** 本地应用 op（与 internal/graph/op.go 语义保持一致的子集）。 */
+  /** 本地应用 op（场景级逻辑见 `applyOp.ts`，这里只处理视口/设置与版本号）。 */
   private applyLocal(ops: Op[]): void {
     for (const op of ops) {
+      if (applySceneOp(this.scene, op)) continue;
       switch (op.kind) {
-        case "add_node":
-          this.scene.addNode(op.node);
-          break;
-        case "remove_node": {
-          const n = this.scene.removeNode(op.id);
-          if (n) {
-            for (const e of this.scene.edgesOf(op.id)) {
-              this.scene.removeEdge(e.id);
-            }
-          }
-          break;
-        }
-        case "move_node": {
-          const n = this.scene.getNode(op.id);
-          if (!n) break;
-          const next: RawNode = {
-            ...n,
-            rect: {
-              ...n.rect,
-              x: op.delta ? n.rect.x + op.x : op.x,
-              y: op.delta ? n.rect.y + op.y : op.y,
-            },
-          };
-          this.scene.updateNode(next);
-          break;
-        }
-        case "resize_node": {
-          const n = this.scene.getNode(op.id);
-          if (!n) break;
-          this.scene.updateNode({
-            ...n,
-            rect: { ...n.rect, w: op.w, h: op.h },
-          });
-          break;
-        }
-        case "set_title": {
-          const n = this.scene.getNode(op.id);
-          if (!n) break;
-          this.scene.updateNode({ ...n, title: op.title || n.title });
-          break;
-        }
-        case "set_spec": {
-          const n = this.scene.getNode(op.id);
-          if (!n) break;
-          const spec = { ...n.spec };
-          for (const k of op.unset ?? []) delete spec[k];
-          for (const [k, v] of Object.entries(op.patch ?? {})) spec[k] = v;
-          this.scene.updateNode({ ...n, spec });
-          break;
-        }
-        case "set_state": {
-          const n = this.scene.getNode(op.id);
-          if (!n) break;
-          this.scene.updateNode({
-            ...n,
-            state: op.state,
-            result: op.result ?? (op.state === "idle" ? undefined : n.result),
-            error: op.error ?? (op.state === "idle" ? null : n.error),
-          });
-          break;
-        }
-        case "add_edge": {
-          const from = this.scene.getNode(op.edge.from.nodeId);
-          const to = this.scene.getNode(op.edge.to.nodeId);
-          if (!from || !to) break;
-          // 单入端口替换语义（与服务端一致）
-          const targetPort = to.ports.inputs.find(
-            (p) => p.id === op.edge.to.portId,
-          );
-          if (targetPort && !targetPort.multiple) {
-            for (const e of this.scene.upstreamOf(to.id)) {
-              if (e.to.portId === op.edge.to.portId)
-                this.scene.removeEdge(e.id);
-            }
-          }
-          this.scene.addEdge(op.edge);
-          break;
-        }
-        case "remove_edge":
-          this.scene.removeEdge(op.id);
-          break;
-        case "group": {
-          for (const id of op.nodeIds) {
-            const n = this.scene.getNode(id);
-            if (n) this.scene.updateNode({ ...n, parentId: op.groupId });
-          }
-          break;
-        }
-        case "ungroup": {
-          for (const n of this.scene.childrenOf(op.groupId)) {
-            this.scene.updateNode({ ...n, parentId: undefined });
-          }
-          break;
-        }
-        case "set_parent": {
-          const n = this.scene.getNode(op.id);
-          if (n) this.scene.updateNode({ ...n, parentId: op.parentId });
-          break;
-        }
         case "set_viewport":
           this.viewport.set(op.viewport);
           this.notifyViewport();
@@ -558,6 +577,12 @@ export class CanvasKernel {
       }
     };
     if (cmd.type === "move-nodes") for (const id of cmd.ids) capture(id);
+    if (
+      cmd.type === "align-nodes" ||
+      cmd.type === "distribute-nodes" ||
+      cmd.type === "layout-layers"
+    )
+      for (const o of cmd.offsets) capture(o.id);
     if (cmd.type === "resize-node") capture(cmd.id);
     if (cmd.type === "rename") capture(cmd.id);
     if (cmd.type === "set-spec") capture(cmd.id);
@@ -609,6 +634,18 @@ export class CanvasKernel {
         for (const k of cmd.unset ?? []) patch[k] = n.spec[k];
         for (const k of Object.keys(cmd.patch ?? {})) unset.push(k);
         return [{ kind: "set_spec", id: cmd.id, patch, unset }];
+      }
+      case "align-nodes":
+      case "distribute-nodes":
+      case "layout-layers": {
+        // 撤销：按执行前的矩形回到原位（选后立刻再对齐/撤销都不漂移）
+        const inverse: Op[] = [];
+        for (const o of cmd.offsets) {
+          const r = before.rectOf(o.id);
+          if (r && (o.dx !== 0 || o.dy !== 0))
+            inverse.push({ kind: "move_node", id: o.id, x: r.x, y: r.y });
+        }
+        return inverse;
       }
       case "add-node":
         return [{ kind: "remove_node", id: cmd.node.id, cascade: true }];

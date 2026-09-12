@@ -287,6 +287,84 @@ describe("CanvasKernel", () => {
     expect(k.scene.getNode("b")?.parentId).toBeUndefined();
   });
 
+  // ATK-30：additive 必须是「真生效」——Shift 追加 / 反选 / 框选并入，
+  // 任一条退化成静默覆盖，多选工具栏（对齐/分布/分层）就永远到不了。
+  it("Shift 点击节点：追加到选区，而不是覆盖", () => {
+    // 这是上一版的真实缺陷：状态机产出了 `intent.additive`，
+    // 但 `handleIntent` 的 `select` 分支直接 `this.selection = intent.selection`，
+    // 把 additive 丢掉 —— 于是 Shift 点击会静默覆盖选区，用户堆不出多选，
+    // 多选工具栏（对齐/分布/分层）的入口等于失效。
+    const k = new CanvasKernel(
+      makeDoc([prompt("a", 0, 0), prompt("b", 400, 0), prompt("c", 800, 0)]),
+    );
+    k.handleIntent({
+      type: "select",
+      selection: { nodes: ["a"], edges: [] },
+      additive: false,
+    });
+    expect(k.currentSelection.nodes).toEqual(["a"]);
+
+    k.handleIntent({
+      type: "select",
+      selection: { nodes: ["b"], edges: [] },
+      additive: true,
+    });
+    expect(k.currentSelection.nodes).toEqual(["a", "b"]);
+
+    k.handleIntent({
+      type: "select",
+      selection: { nodes: ["c"], edges: [] },
+      additive: true,
+    });
+    expect(k.currentSelection.nodes).toEqual(["a", "b", "c"]);
+  });
+
+  it("Shift 点击已选中的节点 → 反选", () => {
+    const k = new CanvasKernel(
+      makeDoc([prompt("a", 0, 0), prompt("b", 400, 0)]),
+    );
+    k.setSelection({ nodes: ["a", "b"], edges: [] });
+    k.handleIntent({
+      type: "select",
+      selection: { nodes: ["b"], edges: [] },
+      additive: true,
+    });
+    expect(k.currentSelection.nodes).toEqual(["a"]);
+  });
+
+  it("不按 Shift 点击 → 替换选区（additive 不误伤默认路径）", () => {
+    const k = new CanvasKernel(
+      makeDoc([prompt("a", 0, 0), prompt("b", 400, 0)]),
+    );
+    k.setSelection({ nodes: ["a"], edges: [] });
+    k.handleIntent({
+      type: "select",
+      selection: { nodes: ["b"], edges: [] },
+      additive: false,
+    });
+    expect(k.currentSelection.nodes).toEqual(["b"]);
+  });
+
+  it("Shift 框选：并入既有选区且去重", () => {
+    const k = new CanvasKernel(
+      makeDoc([prompt("a", 0, 0), prompt("b", 400, 0)]),
+    );
+    k.setSelection({ nodes: ["a"], edges: [] });
+    k.setSelection({ nodes: ["a", "b"], edges: [] }, { additive: true });
+    expect(k.currentSelection.nodes).toEqual(["a", "b"]);
+  });
+
+  it("多选后拖动：整批节点一起移动（多选联动）", () => {
+    const k = new CanvasKernel(
+      makeDoc([prompt("a", 0, 0), prompt("b", 400, 0)]),
+    );
+    k.setSelection({ nodes: ["a", "b"], edges: [] });
+    const ops = k.handleIntent({ type: "drag", dx: 30, dy: 12 });
+    expect(ops).toHaveLength(2);
+    expect(k.scene.getNode("a")?.rect.x).toBe(30);
+    expect(k.scene.getNode("b")?.rect.x).toBe(430);
+  });
+
   it("提交载荷带当前版本号", () => {
     const k = new CanvasKernel(makeDoc([prompt("a", 0, 0)]));
     k.dispatch({ type: "move-nodes", ids: ["a"], dx: 1, dy: 1 });

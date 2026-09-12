@@ -95,7 +95,7 @@
 | --- | --- | --- | --- | --- |
 | 3.1 | 无限画布平移/缩放（滚轮 + 滑杆 + 重置） | `infinite-canvas.tsx` | 缩放范围 0.05–5，指针为锚点 | done |
 | 3.2 | 空格/Ctrl 临时切换 选择 ⇄ 移动 | 同上 | 按住生效，松开还原 | done |
-| 3.3 | 框选（Ctrl/Cmd + 拖拽），Shift 追加 | `handleGlobalPointerMove` | 交集判定，additive 支持 | done |
+| 3.3 | 框选（Ctrl/Cmd + 拖拽），Shift 追加 | `handleGlobalPointerMove` | 交集判定；**Shift 追加与反选由内核持有语义**（`CanvasKernel.setSelection(sel,{additive})` / `toggleSelection`，`CanvasSurface` 只传命中集合与修饰键）。曾出现「状态机产出 `additive`、内核 `select` 分支丢弃它」的假绿（Shift 点击静默覆盖选区，多选堆不出来、多选工具栏入口失效），已修并补回归用例（见 `kernel/__tests__/kernel.test.ts`） | done |
 | 3.4 | 节点拖拽（多选联动、组内成员跟随） | `handleNodeMouseDown` + rAF | 拖组时成员一起移动 | done |
 | 3.5 | 节点八向缩放 + 图片等比锁定 | `canvas-node.tsx` resize | `freeResize=false` 时保持原始比例 | done |
 | 3.6 | 连线拖拽创建 + 连线校验 | `normalizeConnection` | 配置节点之间禁止连线（原项目明确报错） | done |
@@ -111,6 +111,8 @@
 | 3.16 | 左侧面板（画布元素/资产/提示词 三 Tab，可拖宽） | `canvas-side-panel.tsx` 610 行 | 宽度持久化到 localStorage | done |
 | 3.17 | 元素列表（类型筛选/搜索/组树形展开/定位/预览/批量选择导出） | `CanvasNodesTab` | 组内子节点可折叠；批量导出 zip | done |
 | 3.18 | 多选工具栏（打组/解散） | `canvas-selection-toolbar.tsx` | 虚线选区 + 工具栏 | done |
+| 3.29 | **一键对齐 / 等间距分布**（本仓新增，原项目无） | 原项目仅拖拽时 `alignmentGuides` 吸附辅助线，无「对多选节点一键对齐」入口 | `kernel/geometry.ts` `alignOffsets` / `distributeOffsets`（纯函数）+ `CanvasKernel.alignSelection` / `distributeSelection` + `SelectionToolbar` | 六向对齐（左/水平居中/右/顶/垂直居中/底）与水平/垂直等距：位移为绝对目标坐标（重复点击幂等，不漂移）；已对齐时按钮置灰；少于此数（对齐 <2、分布 <3）不产生 op；只读画布不生效；对齐可被一次 Ctrl+Z 整体还原；`readOnly` / NaN 输入被丢弃（见 `kernel/__tests__/align.test.ts` 23 例） | done |
+| 3.30 | **分层成列 / 按层对齐**（本仓新增，原项目无） | 原项目既无批量对齐入口，也无「按连线层级整理」能力 | `kernel/geometry.ts` `layerRanks` / `layeredColumnOffsets`（纯函数）+ `CanvasKernel.layoutByLayers` / `isLayeredAlready` + `SelectionToolbar` / 右键菜单 | 按连线拓扑层级成列：**同一层的节点对齐到同一列（x 轴相同）**，列间距按该层最宽节点 + 间距，列内按原顺序自上而下铺开；用最长路径定层，连线不会倒退；成环时**先做强连通分量（SCC）收缩再定层**（迭代式 Tarjan，不递归不爆栈）：环上节点互为上下游故共享同一层，环下游的无环节点仍拿到正确层号。曾出现「Kahn 只给定层到入度归零的节点」导致**图里只要有一个环，整个下游子图被压进同一列**的缺陷，已修（见 `kernel/__tests__/layers.test.ts`「环上节点同层，环下游的无环节点仍拿到正确层号」等 5 例）；位移为绝对坐标（重复点击幂等）；不足 2 个不产生 op；只读画布不生效；整理可被一次 Ctrl+Z 整体还原（见 `kernel/__tests__/layers.test.ts` 26 例）。**不做**：连线交叉优化 / 自动改道 / 删除节点（那是 Dagre 级全图重排，另议） | done |
 | 3.19 | 撤销/重做（50 步，含视口/背景/助手会话） | `historyRef` 180ms 防抖合并 | 组合键 Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y | done |
 | 3.20 | 复制/粘贴（内部剪贴板 + 系统剪贴板图片/文本） | `pasteSystemClipboard` | 粘贴节点、粘贴图片文件、粘贴文本 | done |
 | 3.21 | 全选（Ctrl+A）、Esc 清空选择并关浮层 | `handleKeyDown` | 与文档一致 | done |
@@ -296,7 +298,8 @@
 
 1. **逆向清单**：用 `rg -o "i18n.t\(\"[a-zA-Z0-9._]+\"" web/src` 提取全部文案 key，
    逐 key 标注「有落位 / 不复刻」，输出 `docs/design/parity/i18n-keys.json`。
-2. **交互清单**：对 `project.tsx` 的 3384 行逐段（已按第 3 节拆为 28 项）打勾。
+2. **交互清单**：对 `project.tsx` 的 3384 行逐段（已按第 3 节拆为 28 项）打勾；
+   3.29 / 3.30 是本仓在对照之外主动补的能力（原项目没有），不计入「复刻」分母。
 3. **契约清单**：对 `types/canvas.ts` / `types/canvas-plugin.ts` 的每个类型字段按 §2.13 映射。
 4. **CI 门禁**：`make parity` 运行上述三个脚本，未打勾项数下降才算进度。
 

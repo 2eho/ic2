@@ -6,6 +6,9 @@ import type { Op, Rect, Selection, Viewport } from "./types";
  */
 export type Command =
   | { type: "move-nodes"; ids: string[]; dx: number; dy: number }
+  | { type: "align-nodes"; offsets: MoveOffset[] }
+  | { type: "distribute-nodes"; offsets: MoveOffset[] }
+  | { type: "layout-layers"; offsets: MoveOffset[] }
   | { type: "resize-node"; id: string; rect: Rect; keepAspect: boolean }
   | { type: "add-node"; node: import("./types").RawNode }
   | { type: "delete-nodes"; ids: string[] }
@@ -41,6 +44,34 @@ export type Command =
       error?: { code: string; message: string };
     };
 
+/** 对齐/分布产生的位移（相对移动，而不是目标坐标）。 */
+export interface MoveOffset {
+  id: string;
+  dx: number;
+  dy: number;
+}
+
+/** 位移 → 目标坐标的纯函数（幂等：重复执行不漂移）。 */
+export function offsetsToMoves(
+  offsets: MoveOffset[],
+  rectOf: (id: string) => Rect | undefined,
+): Op[] {
+  const ops: Op[] = [];
+  for (const o of offsets) {
+    if (!Number.isFinite(o.dx) || !Number.isFinite(o.dy)) continue;
+    if (o.dx === 0 && o.dy === 0) continue;
+    const rect = rectOf(o.id);
+    if (!rect) continue;
+    ops.push({
+      kind: "move_node",
+      id: o.id,
+      x: rect.x + o.dx,
+      y: rect.y + o.dy,
+    });
+  }
+  return ops;
+}
+
 /** 命令 → op 列表。纯函数，便于单测与批量合并。 */
 export function commandToOps(cmd: Command): Op[] {
   switch (cmd.type) {
@@ -70,6 +101,12 @@ export function commandToOps(cmd: Command): Op[] {
         id,
         cascade: true,
       }));
+    case "align-nodes":
+    case "distribute-nodes":
+    case "layout-layers":
+      // 需要节点当前矩形（世界坐标）才能算出绝对目标位置，
+      // 由 CanvasKernel 用 offsetsToMoves 展开；此处不重复实现。
+      return [];
     case "duplicate-nodes":
       return []; // 由调用方展开为 add_node + add_edge（需要重映射边端点）
     case "connect":
