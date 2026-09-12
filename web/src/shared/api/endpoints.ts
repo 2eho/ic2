@@ -40,6 +40,8 @@ export const api = {
     }),
   logout: () =>
     request<{ ok: boolean }>("/api/v1/auth/logout", { method: "POST" }),
+  openAccess: () =>
+    request<Session>("/api/v1/auth/open", { method: "POST" }),
   me: () => request<{ user: User; workspaces: Workspace[] }>("/api/v1/me"),
 
   listWorkspaces: () => request<{ items: Workspace[] }>("/api/v1/workspaces"),

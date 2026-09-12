@@ -38,6 +38,13 @@ paths:
     post:
       operationId: register
       summary: 注册（受 IC_ALLOW_REGISTRATION 控制）
+  /auth/open:
+    get:
+      operationId: openAccessGet
+      summary: 开放访问签发会话（仅 IC_OPEN_ACCESS=true）
+    post:
+      operationId: openAccess
+      summary: 开放访问签发会话（仅 IC_OPEN_ACCESS=true）
   /me:
     get:
       operationId: me

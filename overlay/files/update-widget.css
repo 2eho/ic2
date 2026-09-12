@@ -1,0 +1,67 @@
+#canvas-ov-pill {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  right: auto;
+  bottom: auto;
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 10px 6px 12px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #e5e7eb;
+  font: 12px/1.2 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+#canvas-ov-pill.dragging { cursor: grabbing; opacity: 0.95; }
+#canvas-ov-pill .ver {
+  font-weight: 650;
+  color: #f9fafb;
+  white-space: nowrap;
+}
+#canvas-ov-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  flex: 0 0 auto;
+}
+#canvas-ov-pill button {
+  appearance: none;
+  border: 0;
+  background: #22c55e;
+  color: #052e16;
+  font: inherit;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#canvas-ov-pill button:hover:not(:disabled) {
+  background: #4ade80;
+}
+#canvas-ov-pill button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+#canvas-ov-pill .hint {
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}

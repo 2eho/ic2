@@ -48,6 +48,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
+	mux.HandleFunc("GET /api/v1/auth/open", h.openAccess)
+	mux.HandleFunc("POST /api/v1/auth/open", h.openAccess)
 	mux.HandleFunc("GET /api/v1/me", h.me)
 
 	// 工作区偏好（含凭据的 at-rest 加密存储与导入导出）
@@ -220,6 +222,7 @@ func (h *handlers) meta(w http.ResponseWriter, _ *http.Request) {
 			"localAgent":   h.deps.Config.AgentLocalAllowed,
 			"legacyImport": true,
 			"registration": h.deps.Config.AllowRegistration,
+			"openAccess":   h.deps.Config.OpenAccess,
 		},
 		"limits": PublicLimits(),
 		"time":   time.Now().UTC().Format(time.RFC3339),

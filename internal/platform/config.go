@@ -30,6 +30,8 @@ type Config struct {
 
 	SessionCookieSecure bool
 	AllowRegistration   bool
+	// OpenAccess 为 true 时跳过登录墙：启动时引导本地用户并开放 /auth/open。
+	OpenAccess bool
 
 	PluginRegistry    string
 	AgentLocalAllowed bool
@@ -61,6 +63,7 @@ func Defaults() Config {
 		WorkerConcurrency:   8,
 		SessionCookieSecure: false,
 		AllowRegistration:   true,
+		OpenAccess:          false,
 		AgentLocalAllowed:   true,
 		LogLevel:            "info",
 		LogFormat:           "text",
@@ -85,6 +88,7 @@ func LoadConfig() (Config, error) {
 	c.WorkerConcurrency = int(envInt64("IC_WORKER_CONCURRENCY", int64(c.WorkerConcurrency)))
 	c.SessionCookieSecure = envBool("IC_SESSION_COOKIE_SECURE", c.SessionCookieSecure)
 	c.AllowRegistration = envBool("IC_ALLOW_REGISTRATION", c.AllowRegistration)
+	c.OpenAccess = envBool("IC_OPEN_ACCESS", c.OpenAccess)
 	c.PluginRegistry = envStr("IC_PLUGIN_REGISTRY", c.PluginRegistry)
 	c.AgentLocalAllowed = envBool("IC_AGENT_LOCAL_ALLOWED", c.AgentLocalAllowed)
 	c.LogLevel = envStr("IC_LOG_LEVEL", c.LogLevel)

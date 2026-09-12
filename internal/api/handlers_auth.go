@@ -62,6 +62,25 @@ func (h *handlers) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, sess)
 }
 
+
+func (h *handlers) openAccess(w http.ResponseWriter, r *http.Request) {
+	if !h.deps.Config.OpenAccess {
+		writeError(w, r, platform.NewError(http.StatusNotFound, platform.CodeNotFound, "open access is disabled"))
+		return
+	}
+	if h.deps.Auth == nil {
+		writeError(w, r, platform.NewError(http.StatusNotImplemented, platform.CodeNotImplemented, "auth is not configured"))
+		return
+	}
+	sess, err := h.deps.Auth.OpenAccess(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	setSessionCookie(w, h.deps.Config, sess.Token, sess.ExpiresAt)
+	writeJSON(w, http.StatusOK, sess)
+}
+
 func (h *handlers) logout(w http.ResponseWriter, r *http.Request) {
 	if tok := bearerOrCookie(r); tok != "" && h.deps.Auth != nil {
 		_ = h.deps.Auth.Logout(r.Context(), tok)

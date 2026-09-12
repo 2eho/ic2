@@ -53,3 +53,9 @@ packages/*/template/dist/
 # pnpm 本地存储与缓存
 .pnpm-store/
 .pnpm-cache/
+*.pid
+/run/
+overlay/*.log
+overlay/*.pid
+overlay/latest.cache
+overlay/deployed.sha

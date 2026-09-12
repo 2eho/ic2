@@ -14,7 +14,7 @@ import { NotFoundPage } from "./NotFoundPage";
 import { translate, type Locale } from "@/shared/i18n";
 
 export function App() {
-  const { session, loading, logout } = useSession();
+  const { session, loading, logout, openAccess } = useSession();
   const [locale, setLocale] = useState<Locale>("zh-CN");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const t = useCallback(
@@ -39,7 +39,13 @@ export function App() {
     <Routes>
       <Route
         path="/login"
-        element={session ? <Navigate to="/" replace /> : <LoginPage t={t} />}
+        element={
+          session || openAccess ? (
+            <Navigate to="/" replace />
+          ) : (
+            <LoginPage t={t} />
+          )
+        }
       />
       <Route
         element={
@@ -53,6 +59,8 @@ export function App() {
               onLocaleChange={setLocale}
               onThemeChange={setTheme}
             />
+          ) : openAccess ? (
+            <div className="ic-empty">{t("common.loading")}</div>
           ) : (
             <Navigate to="/login" replace />
           )

@@ -350,6 +350,8 @@ type PluginInstallInput struct {
 type AuthService interface {
 	Login(ctx context.Context, email, password string) (*SessionDTO, error)
 	Register(ctx context.Context, email, name, password string) (*SessionDTO, error)
+	// OpenAccess 在 IC_OPEN_ACCESS 开启时为引导用户签发会话；否则应返回 404。
+	OpenAccess(ctx context.Context) (*SessionDTO, error)
 	Logout(ctx context.Context, token string) error
 	Authenticate(ctx context.Context, token string) (*Principal, error)
 	ListWorkspaces(ctx context.Context, userID string) ([]WorkspaceDTO, error)

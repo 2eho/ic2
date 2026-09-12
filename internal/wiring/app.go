@@ -170,6 +170,13 @@ func Build(ctx context.Context, o Options) (*App, error) {
 
 	// ---------------- 身份 ----------------
 	app.Auth = identity.New(db.DB, clock, ids, cfg)
+	if cfg.OpenAccess {
+		if err := app.Auth.EnsureOpenAccessBootstrap(ctx); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("开放访问引导用户: %w", err)
+		}
+		o.Logger.Info("IC_OPEN_ACCESS 已启用：引导本地用户就绪")
+	}
 
 	// ---------------- 工作区偏好（含凭据 at-rest 加密） ----------------
 	app.Prefs = workspace.New(db.DB, cfg.EffectiveSecretKey(), clock)
