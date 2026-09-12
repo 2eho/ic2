@@ -1,0 +1,262 @@
+# IC 对外 HTTP 契约（唯一真源）。
+#
+# 纪律（docs/design/08-infra.md §6）：
+#   改 API 必须先改本文件，再改 internal/api/router.go；
+#   路由集合与本文件的双向一致性由 `make gen` 强制（少一条或多一条都红）。
+#   本文件刻意保持「机器可读的结构 + 人的意图」：schema 细节写 DTO 结构，
+#   语义与不变量的引用写在 description 里，便于评审时能追到设计文档。
+openapi: 3.1.0
+info:
+  title: IC API
+  version: 1.0.0
+  description: 无限画布 AI 创作平台的服务端 API。所有写操作要求幂等键或版本号，错误码见 contracts/errors.yaml。
+servers:
+  - url: /api/v1
+paths:
+  # 健康与就绪：不经 /api/v1 前缀（供 LB / k8s probe 使用）
+  /healthz:
+    get:
+      operationId: healthz
+      summary: 进程存活探针（不检查依赖）
+  /readyz:
+    get:
+      operationId: readyz
+      summary: 就绪探针（检查 DB 等依赖，不可用处返回 503）
+  /meta:
+    get:
+      operationId: getMeta
+      summary: 版本、能力开关与边界常量（含 limits）
+  /auth/login:
+    post:
+      operationId: login
+      summary: 登录，返回会话 token
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: 注销当前会话
+  /auth/register:
+    post:
+      operationId: register
+      summary: 注册（受 IC_ALLOW_REGISTRATION 控制）
+  /me:
+    get:
+      operationId: me
+      summary: 当前用户与可见工作区
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: 列出工作区
+    post:
+      operationId: createWorkspace
+      summary: 创建工作区
+  /workspaces/{wid}/prefs:
+    get:
+      operationId: getWorkspacePrefs
+      summary: 读取工作区偏好与凭据掩码
+      description: |
+        偏好分两段：prefs（明文，可导出）与 secrets（at-rest 加密，只回掩码）。
+        因此「凭据只进不出」（INV-5）在偏好这一层也成立，不只在 provider_credentials 里成立。
+    patch:
+      operationId: updateWorkspacePrefs
+      summary: 合并更新偏好；写入凭据需要 ActManageConfig
+  /workspaces/{wid}/prefs/export:
+    get:
+      operationId: exportWorkspacePrefs
+      summary: 导出配置（默认不含凭据；includeSecrets=true 需更高角色）
+  /workspaces/{wid}/prefs/import:
+    post:
+      operationId: importWorkspacePrefs
+      summary: 导入配置（合并语义）；含 secrets 时需更高角色
+  /workspaces/{wid}/projects:
+    get:
+      operationId: listProjects
+      summary: 列出项目
+    post:
+      operationId: createProject
+      summary: 创建项目
+  /projects/{pid}/canvases:
+    get:
+      operationId: listCanvases
+      summary: 列出画布
+    post:
+      operationId: createCanvas
+      summary: 创建画布
+  /canvases/{cid}:
+    get:
+      operationId: getCanvas
+      summary: 读取权威画布文档（含版本号与 op 日志水位）
+    delete:
+      operationId: deleteCanvas
+      summary: 删除画布
+  /canvases/{cid}/ops:
+    get:
+      operationId: listOps
+      summary: 读取 op 日志（用于重放与离线补齐）
+    post:
+      operationId: appendOps
+      summary: 提交 op 批量；携带 baseVersion，冲突按可 rebase / 需裁决两档处理（INV-1）
+  /canvases/{cid}/import:
+    post:
+      operationId: importCanvas
+      summary: 导入（新版 JSON 或旧版 IndexedDB 导出）；幂等，附导入前后核对报告
+  /canvases/{cid}/export:
+    get:
+      operationId: exportCanvas
+      summary: 导出画布 JSON（version 3 格式，供 zip 打包）
+  /canvases/{cid}/events:
+    get:
+      operationId: canvasEvents
+      summary: 画布实时事件（SSE）；事件类型见 contracts/events.yaml
+  /workspaces/{wid}/assets:
+    get:
+      operationId: listAssets
+      summary: 资产分页列表（kind 过滤 + cursor）
+    post:
+      operationId: uploadAsset
+      summary: 上传资产（内容寻址去重）
+  /assets/{aid}:
+    get:
+      operationId: getAsset
+      summary: 资产元信息
+    patch:
+      operationId: updateAsset
+      summary: 更新资产显示元数据（标题/标签/备注）
+      description: |
+        只允许改显示元数据。hash/size/mime/kind 是**内容寻址的事实**，
+        改了会破坏「同一 hash 只存一份」这条不变量（DB 说是 PNG、Blob 里是 JPEG），
+        因此这些字段不在补丁范围内。跨工作区更新返回 404 而不是 403（不泄露存在性）。
+    delete:
+      operationId: deleteAsset
+      summary: 删除资产（引用计数归零后由 GC 回收）
+  /assets/{aid}/raw:
+    get:
+      operationId: getAssetRaw
+      summary: 资产原始内容（支持 Range）
+  /assets/{aid}/thumb:
+    get:
+      operationId: getAssetThumb
+      summary: 资产缩略图
+  /canvases/{cid}/runs:
+    get:
+      operationId: listRuns
+      summary: 画布下的 Run 列表
+    post:
+      operationId: createRun
+      summary: 触发 Run（编译 DAG，校验失败在提交前返回 422）
+  /runs/{rid}:
+    get:
+      operationId: getRun
+      summary: Run 详情（含 Step/Attempt/usage）
+  /runs/{rid}/cancel:
+    post:
+      operationId: cancelRun
+      summary: 取消 Run（context 级联取消）
+  /runs/{rid}/replay:
+    post:
+      operationId: replayRun
+      summary: 重放 Run（使用快照输入，保证可复现）
+  /workspaces/{wid}/generate:
+    post:
+      operationId: generate
+      summary: 直通生成（工作台用，不落画布）；与画布共用执行引擎
+      description: |
+        references 是参考图的 assetId 列表（图生图 / 视频参考），上限 7 张。
+        它单独成字段而不是放进 params：资源引用需要类型校验与限额，
+        混进自由字典会变成「什么都能传」。
+        校验失败在**提交前**返回 422，不产生上游调用（与 ATK-20 同一条纪律）。
+  /workspaces/{wid}/providers:
+    get:
+      operationId: listProviders
+      summary: 列出渠道
+    post:
+      operationId: createProvider
+      summary: 创建渠道
+  /workspaces/{wid}/providers/{pid}/credentials:
+    post:
+      operationId: createCredential
+      summary: 创建凭据（secret 只进不出，仅回显掩码，INV-5）
+  /workspaces/{wid}/providers/{pid}/test:
+    post:
+      operationId: testProvider
+      summary: 连通性探测（受 SSRF 防护约束）
+  /workspaces/{wid}/providers/{pid}/models:
+    post:
+      operationId: saveModels
+      summary: 保存渠道下勾选的模型与能力（能力显式落库，避免关键词表演进导致漂移）
+  /workspaces/{wid}/models:
+    get:
+      operationId: listModels
+      summary: 模型列表（按能力过滤）
+  /workspaces/{wid}/prompt-sources:
+    get:
+      operationId: listPromptSources
+      summary: 列出提示词来源
+    post:
+      operationId: createPromptSource
+      summary: 新增提示词来源（服务端拉取，不再浏览器直连）
+  /workspaces/{wid}/prompt-sources/{sid}/sync:
+    post:
+      operationId: syncPromptSource
+      summary: 立即拉取来源（失败保留旧缓存）
+  /prompts:
+    get:
+      operationId: searchPrompts
+      summary: 提示词检索（服务端全文检索）
+  /workspaces/{wid}/plugins:
+    get:
+      operationId: listPlugins
+      summary: 列出插件（内置与已安装合并）
+    post:
+      operationId: installPlugin
+      summary: 安装插件（必须展示权限清单并确认，INV-6）
+  /workspaces/{wid}/plugins/{key}/enable:
+    post:
+      operationId: enablePlugin
+      summary: 启用/禁用插件（权限扩大需重新确认）
+  /plugins/{key}/{version}/bundle:
+    get:
+      operationId: pluginBundle
+      summary: 插件 bundle（在 sandbox iframe 中执行，无 same-origin）
+  /plugin-registry:
+    get:
+      operationId: pluginRegistry
+      summary: 官方插件注册表
+  /workspaces/{wid}/agent-skills:
+    get:
+      operationId: listSkills
+      summary: 列出 Agent Skills（模型指令片段）
+    post:
+      operationId: saveSkill
+      summary: 创建或更新 Skill（有长度与数量上限）
+  /workspaces/{wid}/agent-skills/{name}:
+    delete:
+      operationId: deleteSkill
+      summary: 删除 Skill
+  /agent/sessions:
+    post:
+      operationId: createAgentSession
+      summary: 创建 Agent 会话（threadId 三元归属，快照为权威）
+  /agent/sessions/{sid}:
+    get:
+      operationId: getAgentSession
+      summary: 会话详情
+  /agent/sessions/{sid}/history:
+    get:
+      operationId: agentHistory
+      summary: 会话历史（快照为权威，实时事件只补充未物化条目）
+  /agent/sessions/{sid}/turns:
+    post:
+      operationId: createAgentTurn
+      summary: 提交一轮输入（幂等由 turnId 保证）
+  /agent/sessions/{sid}/turns/{tid}/approve:
+    post:
+      operationId: approveAgentTurn
+      summary: 审批工具调用（含 op 预览与影响范围，可一键撤销）
+  /agent/tool-results:
+    post:
+      operationId: agentToolResult
+      summary: 浏览器执行器回传工具结果（30s 超时）
+  /mcp:
+    post:
+      operationId: mcpHTTP
+      summary: MCP Streamable HTTP 端点（任意 MCP 客户端可连）

@@ -1,0 +1,1 @@
+{"name":"models/veo-3.0-generate-preview/operations/abc123","done":true,"response":{"generateVideoResponse":{"generatedSamples":[{"video":{"uri":"https://example.com/video.mp4"}}]}},"metadata":{"progressPercent":100}}

@@ -1,0 +1,72 @@
+# 稳定错误码契约（唯一真源）。
+#
+# 纪律（docs/design/08-infra.md §6）：
+#   新增错误码必须同时：① 在本文件声明；② 在 internal/platform/errors.go 定义常量；
+#   ③ 在 web/src/shared/i18n/{zh-CN,en-US}.ts 的 errors 命名空间加文案。
+# 三者一致性由 `make gen` 强制校验，缺一即失败。
+#
+# http 字段仅作文档参考：真实状态码由 internal/platform/errors.go 构造时给出。
+codes:
+  - code: invalid_request
+    http: 422
+    desc: 请求参数不合法（结构合法但语义不合法）
+  - code: invalid_geometry
+    http: 422
+    desc: 画布坐标或尺寸超出允许范围（含 NaN/Inf）
+  - code: invalid_node_type
+    http: 422
+    desc: 未知的节点类型
+  - code: invalid_spec
+    http: 422
+    desc: 节点配置不合法（字段类型或必填项）
+  - code: invalid_id
+    http: 422
+    desc: 标识符不合法（长度/字符集）
+  - code: unknown_field
+    http: 422
+    desc: 请求包含未知字段（additionalProperties=false）
+  - code: not_found
+    http: 404
+    desc: 对象不存在或无权访问（不泄露存在性）
+  - code: conflict
+    http: 409
+    desc: 版本冲突，客户端需拉取权威文档后重试
+  - code: unauthorized
+    http: 401
+    desc: 未认证或会话失效
+  - code: forbidden
+    http: 403
+    desc: 已认证但无权限
+  - code: rate_limited
+    http: 429
+    desc: 请求过于频繁（本服务侧限流）
+  - code: payload_too_large
+    http: 413
+    desc: 请求体超出大小限制
+  - code: ssrf_blocked
+    http: 422
+    desc: 出网目标被安全策略拒绝
+  - code: quota_exceeded
+    http: 429
+    desc: 已超出工作区配额或日限额
+  - code: upstream_invalid
+    http: 502
+    desc: 上游返回了无法处理的响应
+  - code: upstream_rate_limited
+    http: 429
+    desc: 上游限流，将按退避策略重试
+  - code: content_policy
+    http: 422
+    desc: 内容未通过上游安全审核（不重试）
+  - code: interrupted
+    http: 409
+    desc: 任务被中断（进程重启或用户取消）
+  - code: not_implemented
+    http: 501
+    desc: 该能力尚未实现
+  - code: internal
+    http: 500
+    desc: 服务端内部错误
+  - code: plugin_permission_denied
+    http: 403
+    desc: 插件调用了未声明权限的能力

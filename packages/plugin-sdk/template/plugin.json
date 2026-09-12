@@ -1,0 +1,24 @@
+{
+  "key": "com.example.hello",
+  "name": "Hello 插件（模板）",
+  "version": "1.0.0",
+  "apiVersion": "1.0.0",
+  "author": "you",
+  "entry": "index.js",
+  "permissions": ["node.read", "node.write"],
+  "nodes": [
+    {
+      "type": "com.example.hello:greeting",
+      "title": "问候",
+      "defaultSize": { "width": 260, "height": 140 },
+      "minimapColor": "#93c5fd",
+      "configSchema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "configVersion": 1,
+      "ports": { "inputs": [], "outputs": [] }
+    }
+  ]
+}

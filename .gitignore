@@ -1,0 +1,55 @@
+# 上游参考仓库（仅 CI/本地分析用，不入库）。
+#
+# 必须是 `/upstream/`（锚定仓库根），不能写成 `upstream/`：
+# 后者会匹配**任意层级**的同名目录，把 `docs/upstream/`（上游同步记录与
+# 有意偏离清单，是发布物的一部分）也一并忽略掉。
+# 实测过的后果：`docs/upstream/{sync-log,divergences}.md` 写完看起来正常，
+# `git status` 却是干净的——文件存在但永远不会被提交，
+# 而 `check-upstream-radar` 在本地跑是绿的（它读文件系统，不读 git）。
+/upstream/
+# 分析用镜像：与 upstream/ 同类，用于「读原实现」而不是「引用原代码」。
+# 不入库，避免检查脚本与 code review 把它当成本仓库代码。
+/research/
+# 本地工具链与 Go module cache（跑 make check 的 Go 门禁用；不入库）
+/.toolchain/
+
+# 构建产物。
+#
+# 必须**锚定到仓库根**（`/bin/` 而不是 `bin/`）：非锚定规则会匹配任意层级的
+# 同名目录，把 `packages/plugin-sdk/bin/`（插件的构建脚本，是发布物）也忽略掉。
+# 这与上一轮 `upstream/` 误伤 `docs/upstream/` 是同一类问题——
+# 而且这次会直接让「SDK 少了构建脚本」，用户装了包却无法构建。
+/bin/
+/dist/
+/build/
+*.log
+coverage.out
+node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+
+# 本地数据与密钥
+data/
+# e2e 服务端运行状态（pid/端口/临时目录，由 scripts/e2e-stack.mjs 写出）
+.e2e-stack.json
+.env
+.env.local
+*.local
+*.db
+*.db-shm
+*.db-wal
+
+# 插件 SDK 的构建产物（由 `ic-plugin-build` 生成，不入库：
+# bundle 内容由源码与锁定的 SDK 版本决定，提交它只会产生无意义的 diff）
+packages/*/dist/
+packages/*/template/dist/
+
+# 编辑器
+.DS_Store
+.idea/
+.vscode/
+
+# pnpm 本地存储与缓存
+.pnpm-store/
+.pnpm-cache/

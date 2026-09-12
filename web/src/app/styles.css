@@ -1,0 +1,171 @@
+/* 主题令牌：所有组件只引用变量，禁止写死黑白（见 docs/design/10 §11.2） */
+:root {
+  --ic-bg: #f7f8fa;
+  --ic-surface: #ffffff;
+  --ic-surface-2: #f1f3f7;
+  --ic-border: #e3e6ed;
+  --ic-text: #1f2430;
+  --ic-text-dim: #6b7280;
+  --ic-accent: #4f46e5;
+  --ic-accent-soft: #eef2ff;
+  --ic-danger: #dc2626;
+  --ic-ok: #16a34a;
+  --ic-warn: #d97706;
+  --ic-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.06);
+  --ic-radius: 10px;
+  --ic-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+  --ic-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme="dark"] {
+  --ic-bg: #0f1116;
+  --ic-surface: #171a22;
+  --ic-surface-2: #1f232d;
+  --ic-border: #2a2f3b;
+  --ic-text: #e6e8ee;
+  --ic-text-dim: #9aa3b2;
+  --ic-accent: #818cf8;
+  --ic-accent-soft: #232846;
+  --ic-danger: #f87171;
+  --ic-ok: #4ade80;
+  --ic-warn: #fbbf24;
+  --ic-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--ic-font);
+  background: var(--ic-bg);
+  color: var(--ic-text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--ic-accent);
+}
+
+/* 通用基础组件 */
+.ic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ic-border);
+  background: var(--ic-surface);
+  color: var(--ic-text);
+  padding: 7px 12px;
+  border-radius: 8px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.ic-btn:hover:not(:disabled) {
+  background: var(--ic-surface-2);
+}
+.ic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ic-btn--primary {
+  background: var(--ic-accent);
+  border-color: var(--ic-accent);
+  color: #fff;
+}
+.ic-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  background: var(--ic-accent);
+}
+.ic-btn--danger {
+  color: var(--ic-danger);
+  border-color: color-mix(in srgb, var(--ic-danger) 40%, var(--ic-border));
+}
+.ic-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.ic-input,
+.ic-textarea,
+.ic-select {
+  width: 100%;
+  border: 1px solid var(--ic-border);
+  background: var(--ic-surface);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+.ic-input:focus,
+.ic-textarea:focus,
+.ic-select:focus {
+  border-color: var(--ic-accent);
+  box-shadow: 0 0 0 3px var(--ic-accent-soft);
+}
+.ic-card {
+  background: var(--ic-surface);
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-radius);
+  box-shadow: var(--ic-shadow);
+}
+.ic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ic-surface-2);
+  color: var(--ic-text-dim);
+}
+.ic-badge--ok {
+  color: var(--ic-ok);
+  background: color-mix(in srgb, var(--ic-ok) 12%, transparent);
+}
+.ic-badge--warn {
+  color: var(--ic-warn);
+  background: color-mix(in srgb, var(--ic-warn) 14%, transparent);
+}
+.ic-badge--danger {
+  color: var(--ic-danger);
+  background: color-mix(in srgb, var(--ic-danger) 12%, transparent);
+}
+.ic-dim {
+  color: var(--ic-text-dim);
+}
+.ic-mono {
+  font-family: var(--ic-mono);
+  font-size: 12px;
+}
+.ic-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--ic-text-dim);
+}
+.ic-error {
+  color: var(--ic-danger);
+  font-size: 13px;
+}
