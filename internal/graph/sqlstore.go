@@ -92,7 +92,7 @@ func (s *SQLStore) CreateDocument(ctx context.Context, doc *CanvasDocument) erro
 	_, err = s.db.ExecContext(ctx, s.rebind(
 		`INSERT INTO canvases (id, project_id, name, version, settings, doc, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-		doc.ID, doc.ProjectID, "", doc.Version, mustJSONString(doc.Settings), string(body), doc.UpdatedAt, doc.UpdatedAt)
+		doc.ID, doc.ProjectID, "", doc.Version, mustJSONString(doc.Settings), string(body), sqlTime(doc.UpdatedAt), sqlTime(doc.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return platform.NewError(409, CodeConflict, "canvas already exists")
@@ -106,14 +106,14 @@ func (s *SQLStore) CreateDocument(ctx context.Context, doc *CanvasDocument) erro
 func (s *SQLStore) UpdateMeta(ctx context.Context, canvasID, name string, settings CanvasSettings) error {
 	_, err := s.db.ExecContext(ctx, s.rebind(
 		`UPDATE canvases SET name = ?, settings = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`),
-		name, mustJSONString(settings), time.Now().UTC(), canvasID)
+		name, mustJSONString(settings), sqlTime(time.Now().UTC()), canvasID)
 	return platform.AsError(err)
 }
 
 // DeleteDocument 软删（保留冷静期，见 11 §2.8）。
 func (s *SQLStore) DeleteDocument(ctx context.Context, canvasID string) error {
 	_, err := s.db.ExecContext(ctx, s.rebind(
-		`UPDATE canvases SET deleted_at = ? WHERE id = ?`), time.Now().UTC(), canvasID)
+		`UPDATE canvases SET deleted_at = ? WHERE id = ?`), sqlTime(time.Now().UTC()), canvasID)
 	return platform.AsError(err)
 }
 
@@ -168,7 +168,7 @@ func (s *SQLStore) AppendOps(ctx context.Context, canvasID string, baseVersion i
 	}
 	if _, err := tx.ExecContext(ctx, s.rebind(
 		`UPDATE canvases SET version = ?, doc = ?, updated_at = ? WHERE id = ? AND version = ?`),
-		newVersion, string(body), now, canvasID, curVersion); err != nil {
+		newVersion, string(body), sqlTime(now), canvasID, curVersion); err != nil {
 		return 0, nil, platform.AsError(err)
 	}
 	if _, err := tx.ExecContext(ctx, s.rebind(
@@ -244,9 +244,13 @@ func (s *SQLStore) ListCanvases(ctx context.Context, projectID string) ([]Canvas
 	for rows.Next() {
 		var m CanvasMeta
 		var settingsRaw, docRaw string
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Name, &m.Version, &settingsRaw, &docRaw, &m.UpdatedAt); err != nil {
+		var updatedRaw string
+		// SQLite stores updated_at as TEXT (often Go time.Time.String());
+		// scanning into time.Time fails with unsupported Scan — same class as canvas_ops.
+		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Name, &m.Version, &settingsRaw, &docRaw, &updatedRaw); err != nil {
 			return nil, platform.AsError(err)
 		}
+		m.UpdatedAt = parseSQLTime(updatedRaw)
 		_ = json.Unmarshal([]byte(settingsRaw), &m.Settings)
 		var doc struct {
 			Nodes map[string]json.RawMessage `json:"nodes"`
@@ -261,6 +265,14 @@ func (s *SQLStore) ListCanvases(ctx context.Context, projectID string) ([]Canvas
 func mustJSONString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// sqlTime 写入 SQLite/Postgres 都能读回的 RFC3339Nano 文本（避免 Go String()+monotonic）。
+func sqlTime(t time.Time) string {
+	if t.IsZero() {
+		t = time.Now().UTC()
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func isUniqueViolation(err error) bool {
@@ -320,6 +332,10 @@ func scanOpRecord(rows *sql.Rows, canvasID string) (Record, error) {
 func parseSQLTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
+	}
+	// Strip Go monotonic clock suffix: "... UTC m=+1.23"
+	if i := strings.Index(s, " m="); i >= 0 {
+		s = s[:i]
 	}
 	for _, layout := range []string{
 		time.RFC3339Nano,
