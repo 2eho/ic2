@@ -12,6 +12,8 @@ export type InteractionEvent =
       hitNode?: string;
       hitEdge?: string;
       hitHandle?: ResizeHandle;
+      /** 命中的端口（含所属节点与方向），用于从端口拖出连线。 */
+      hitPort?: { nodeId: string; portId: string; side: "in" | "out"; kind: string };
       modifiers: Modifiers;
     }
   | { type: "pointermove"; point: Vec2; modifiers: Modifiers }
@@ -21,6 +23,14 @@ export type InteractionEvent =
   | { type: "wheel"; point: Vec2; deltaY: number; modifiers: Modifiers }
   | { type: "dblclick"; point: Vec2; hitNode?: string }
   | { type: "blur" };
+
+/** PortHit 是命中的端口信息。 */
+export interface PortHit {
+  nodeId: string;
+  portId: string;
+  side: "in" | "out";
+  kind: string;
+}
 
 export interface Modifiers {
   shift: boolean;
@@ -47,7 +57,27 @@ export type Intent =
   | { type: "select"; selection: Selection; additive: boolean }
   | { type: "clear-selection" }
   | { type: "enter-text-edit"; id: string }
-  | { type: "exit-text-edit" };
+  | { type: "exit-text-edit" }
+  // 连线拖拽（3.x）：从端口拖出、实时预览、落点提交。
+  | {
+      type: "start-connect";
+      nodeId: string;
+      portId: string;
+      side: "in" | "out";
+      kind: string;
+    }
+  | { type: "connect-drag"; point: Vec2 }
+  // 落点为节点：建立连线
+  | {
+      type: "commit-connect";
+      fromNodeId: string;
+      fromPort: string;
+      toNodeId: string;
+      toPort: string;
+    }
+  // 落点为空白：弹出创建菜单（3.7）
+  | { type: "commit-connect-blank"; point: Vec2; fromNodeId: string; fromPort: string }
+  | { type: "cancel-connect" };
 
 export class InteractionMachine {
   private state: InteractionState = "idle";
@@ -55,6 +85,7 @@ export class InteractionMachine {
   private draggingIds: string[] = [];
   private resizeTarget?: { id: string; handle: ResizeHandle };
   private extraModifier = false;
+  private connectFrom: { nodeId: string; portId: string; side: "in" | "out"; kind: string } | null = null;
 
   get current(): InteractionState {
     return this.state;
@@ -108,7 +139,26 @@ export class InteractionMachine {
       this.state = "panning";
       return { type: "none" };
     }
-    // 2) 缩放手柄优先于节点拖拽
+    // 2) 端口命中优先于一切：端口是「连线」的入口，而它通常落在节点边缘上。
+    //    如果让节点拖拽先接管，用户永远拖不出连线（实测过的行为：
+    //    从端口按下会移动整个节点，而用户以为自己在拉线）。
+    if (ev.hitPort) {
+      this.state = "connecting";
+      this.connectFrom = {
+        nodeId: ev.hitPort.nodeId,
+        portId: ev.hitPort.portId,
+        side: ev.hitPort.side,
+        kind: ev.hitPort.kind,
+      };
+      return {
+        type: "start-connect",
+        nodeId: ev.hitPort.nodeId,
+        portId: ev.hitPort.portId,
+        side: ev.hitPort.side,
+        kind: ev.hitPort.kind,
+      };
+    }
+    // 3) 缩放手柄优先于节点拖拽
     if (ev.hitHandle && ev.hitNode) {
       this.state = "resizing-node";
       this.resizeTarget = { id: ev.hitNode, handle: ev.hitHandle };
@@ -119,13 +169,13 @@ export class InteractionMachine {
         point: ev.point,
       };
     }
-    // 3) 命中节点 → 拖拽（首个节点先选中）
+    // 4) 命中节点 → 拖拽（首个节点先选中）
     if (ev.hitNode) {
       this.state = "dragging-node";
       this.draggingIds = [ev.hitNode];
       return { type: "start-drag", ids: [ev.hitNode], point: ev.point };
     }
-    // 4) 命中连线 → 选择连线
+    // 5) 命中连线 → 选择连线
     if (ev.hitEdge) {
       this.state = "idle";
       return {
@@ -134,7 +184,7 @@ export class InteractionMachine {
         additive,
       };
     }
-    // 5) 空白 → 框选
+    // 6) 空白 → 框选
     this.state = "marquee";
     return { type: "start-marquee", point: ev.point, additive };
   }
@@ -161,6 +211,8 @@ export class InteractionMachine {
           return { type: "resize", dx, dy, handle: this.resizeTarget.handle };
         }
         return { type: "none" };
+      case "connecting":
+        return { type: "connect-drag", point: ev.point };
       default:
         return { type: "none" };
     }
@@ -168,6 +220,7 @@ export class InteractionMachine {
 
   private onPointerUp(): Intent {
     const state = this.state;
+    const from = this.connectFrom;
     this.reset();
     switch (state) {
       case "dragging-node":
@@ -176,9 +229,63 @@ export class InteractionMachine {
         return { type: "commit-resize" };
       case "marquee":
         return { type: "commit-marquee", selection: { nodes: [], edges: [] } };
+      case "connecting":
+        // 连线的落点在**上层**决定（只有那里知道命中测试的结果）。
+        // 状态机自己只能表达「拖拽结束了，起点是什么」。
+        return from
+          ? { type: "cancel-connect" }
+          : { type: "none" };
       default:
         return { type: "none" };
     }
+  }
+
+  /**
+   * 由上层调用：指针在连线的落点上松开。
+   *
+   * 之所以不在 onPointerUp 里做命中测试：命中测试需要场景图与视口，
+   * 而状态机的契约是「不依赖渲染与文档」（见 kernel-purity 门禁）。
+   * 上层拿到结果后回传，状态机只负责产出正确语义的意图。
+   */
+  commitConnect(
+    hit: { nodeId: string; portId: string } | null,
+    point: Vec2,
+  ): Intent {
+    const from = this.connectFrom;
+    if (!from) return { type: "none" };
+    this.reset();
+    if (hit && hit.nodeId !== from.nodeId) {
+      // 方向归一：从输入端口拖出时，语义是「把上游连到我的输入」，
+      // 因此起点与终点需要互换。不归一的话用户从输入端拉线会得到一条反向边，
+      // 而画布上看起来是对的（只有执行顺序不对）。
+      if (from.side === "in") {
+        return {
+          type: "commit-connect",
+          fromNodeId: hit.nodeId,
+          fromPort: hit.portId,
+          toNodeId: from.nodeId,
+          toPort: from.portId,
+        };
+      }
+      return {
+        type: "commit-connect",
+        fromNodeId: from.nodeId,
+        fromPort: from.portId,
+        toNodeId: hit.nodeId,
+        toPort: hit.portId,
+      };
+    }
+    if (hit && hit.nodeId === from.nodeId) {
+      // 自连：直接取消，不弹菜单（弹出创建菜单会让人以为「必须再建一个节点」）
+      return { type: "cancel-connect" };
+    }
+    // 落点为空白 → 创建菜单（3.7）
+    return {
+      type: "commit-connect-blank",
+      point,
+      fromNodeId: from.nodeId,
+      fromPort: from.portId,
+    };
   }
 
   private onKeyDown(
@@ -210,6 +317,7 @@ export class InteractionMachine {
     this.state = "idle";
     this.draggingIds = [];
     this.resizeTarget = undefined;
+    this.connectFrom = null;
   }
 
   get isEditingText(): boolean {
@@ -223,5 +331,10 @@ export class InteractionMachine {
   /** 当前正在拖拽的节点（多选联动时由上层使用）。 */
   get dragging(): string[] {
     return [...this.draggingIds];
+  }
+
+  /** 当前正在拖出的连线起点（无则为 null）。 */
+  get connecting(): { nodeId: string; portId: string; side: "in" | "out"; kind: string } | null {
+    return this.connectFrom;
   }
 }

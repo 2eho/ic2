@@ -421,6 +421,22 @@ type AgentService interface {
 	Approve(ctx context.Context, sessionID, turnID, callID, actor string, approve bool) (*AgentTurnDTO, error)
 }
 
+// CanvasSessionSnapshotter 是「随画布导出会话快照」的能力（2.11，可选实现）。
+//
+// 单独一个接口而不是塞进 AgentService：导出是**画布**的能力，
+// 而 AgentService 属于会话领域。用类型断言探测能力，比给 AgentService
+// 加一个「导出时才用」的方法更诚实（只读部署可以不实现它）。
+type CanvasSessionSnapshotter interface {
+	SessionsForCanvas(ctx context.Context, canvasID string, limit int) ([]AgentSnapshot, error)
+}
+
+// AgentSnapshot 是会话快照的对外形状。
+//
+// 用 map 而不是强类型 DTO：api 层不应该为了一个「附带的导出字段」依赖
+// agent 领域（那会让 handler 的测试被迫初始化整个 agent 栈）。
+// 代价是形状不受编译期保护，因此由 wiring 侧的适配器做转换。
+type AgentSnapshot = map[string]any
+
 // PrefsService 是工作区偏好用例接口（见 internal/workspace）。
 //
 // 单独一个接口而不是并进 AuthService：偏好是「内容配置」，

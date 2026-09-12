@@ -86,6 +86,16 @@ type SetSpecPayload struct {
 	ID    string         `json:"id"`
 	Patch map[string]any `json:"patch,omitempty"`
 	Unset []string       `json:"unset,omitempty"`
+	// Meta 修改节点的**扩展元数据**（Node.Meta），不是 spec。
+	//
+	// 为什么要放进 set_spec 而不是新增一个 `set_meta` op：
+	// op 类型是契约面（REST / MCP / 重放 / rebase 都按它分派），
+	// 多一个 op 意味着四处都要能正确处理它，而收益只是「一次调用省 op」。
+	// 放进这里则语义清晰：两者都是「改这个节点的配置」，只是严格程度不同
+	// （spec 强校验、meta 自由）；MetaSet 是显式键集合，避免「传空对象就清空」。
+	Meta map[string]any `json:"meta,omitempty"`
+	// MetaUnset 显式删除 meta 键。
+	MetaUnset []string `json:"metaUnset,omitempty"`
 }
 
 // SetStatePayload 修改运行态（仅执行层与回写路径使用）。

@@ -271,6 +271,20 @@ export interface WorkspacePrefs {
     systemPrompt?: string;
   };
   sync?: { enabled?: boolean; lastSyncedAt?: string; exportZip?: boolean };
+  /**
+   * 本地直连模式（4.21）。
+   *
+   * 与服务端 internal/workspace.Prefs.Direct 一一对应。
+   * 注意 `enabled` 单独不生效：服务端要求 acknowledgedAt 非空
+   *（即用户确认过风险）才认为是真的开启。UI 上必须把这一点表达出来，
+   * 否则用户会看到「开关是开的但没生效」。
+   */
+  direct?: {
+    enabled: boolean;
+    baseUrl?: string;
+    scope?: string[];
+    acknowledgedAt?: string;
+  };
   ui?: Record<string, unknown>;
 }
 

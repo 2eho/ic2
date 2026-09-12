@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/context-flow/ic/internal/agent"
@@ -25,6 +26,8 @@ import (
 	"github.com/context-flow/ic/internal/provider"
 	"github.com/context-flow/ic/internal/provider/adapter/gemini"
 	"github.com/context-flow/ic/internal/provider/adapter/openai"
+	"github.com/context-flow/ic/internal/provider/adapter/script"
+	"github.com/context-flow/ic/internal/sandbox"
 	"github.com/context-flow/ic/internal/workspace"
 	"github.com/context-flow/ic/migrations"
 )
@@ -126,11 +129,18 @@ func Build(ctx context.Context, o Options) (*App, error) {
 
 	// ---------------- 执行引擎 ----------------
 	resolver := provider.NewCredentialResolver(app.Providers)
+	// 把解析器注入 Providers：提交前校验脚本产出需要它拿适配器。
+	app.Providers.SetResolver(resolver)
 	resolver.SetPricing(NewPricingTable(db.DB).Pricing)
 	// 两个协议适配器共用同一个 Transport：超时/退避/SSRF/脱敏策略只有一处。
 	resolver.Register("openai", openai.New(transport))
 	resolver.Register("gemini", gemini.New(transport))
 	resolver.Register("custom", openai.New(transport)) // 自定义渠道默认按 OpenAI 兼容协议
+	// 自定义调用脚本（4.12 / 4.19）：脚本只描述请求，出口仍在服务端。
+	// 这里显式注入沙箱，而不是让适配器内部 new —— 注入点让「沙箱有两个实现」
+	// 变成真的（测试里可替换），也避免适配器偷偷放宽上限。
+	scriptRunner := sandbox.New(sandbox.DefaultLimits())
+	resolver.Register("script", script.New(transport, scriptRunner))
 	// 编译器与执行引擎共用同一份凭据解析：否则会出现
 	// 「手动触发能编译通过、Agent 触发编译失败」这种不一致。
 	compiler := exec.NewCompiler(func(cap provider.Capability, providerID, credentialID string) (provider.Credential, bool) {
@@ -174,13 +184,33 @@ func Build(ctx context.Context, o Options) (*App, error) {
 		Model: newModelClient(app.Providers, transport, resolver),
 	})
 	// Agent 的外部能力注入（9.5–9.7、9.14）：每一项对应工具表里的一个能力组。
+	//
+	// defaultWorkspace 抽出来而不是内联：上游工具面里有两个能力
+	//（canvas_list_projects / workbench_*）需要「不知道画布时用哪个工作区」，
+	// 而这条规则必须与 MCP 的 resolveCanvas 完全一致 ——
+	// 两处各写一份会出现「列画布用 A 工作区、执行用 B 工作区」这种错位。
 	skillsStore := agent.NewSkillsSQLStore(db.DB, clock)
+	defaultWorkspace := func(ctx context.Context) (string, error) {
+		var wsID string
+		if err := db.DB.QueryRowContext(ctx,
+			`SELECT id FROM workspaces ORDER BY created_at LIMIT 1`).Scan(&wsID); err != nil {
+			return "", platform.ErrNotFound("workspace")
+		}
+		return wsID, nil
+	}
 	agentSvc.SetCapabilities(agent.Wire{
 		Runs:    &agentRuns{engine: runs, graph: app.Graph, compiler: compiler},
 		Assets:  &agentAssets{assets: app.Assets, fetch: fetcher},
 		Prompts: &agentPrompts{svc: app.Prompts},
 		Skills:  skillsStore,
 		Files:   &agentAssets{assets: app.Assets, fetch: fetcher},
+		Projects: &agentProjects{
+			graph: app.Graph, auth: app.Auth, defaultWorkspace: defaultWorkspace,
+		},
+		AdHoc: &agentAdHoc{
+			engine: runs, runs: &runsAdapter{engine: runs, preflight: app.preflightGenerate},
+			graph: app.Graph,
+		},
 	})
 	app.Agent = agentSvc
 	app.MCP = agent.NewMCPHandler(agentSvc, func(ctx context.Context) (string, string, error) {
@@ -456,6 +486,13 @@ func EnsureBlobDir(cfg platform.Config) error {
 	return os.MkdirAll(filepath.Dir(cfg.BlobFSRoot), 0o750)
 }
 
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // preflightGenerate 在提交直通生成前校验「凭据可用」。
 //
 // 为什么必须前置：如果等到异步执行时才发现没有凭据，用户拿到的是一个 202 +
@@ -473,11 +510,55 @@ func (a *App) preflightGenerate(ctx context.Context, params map[string]any) erro
 	credID, _ := params["credentialId"].(string)
 	adapter, cred, ok := a.resolver.Resolve(provider.Capability(capability), providerID, credID)
 	if !ok || adapter == nil {
-		return platform.NewError(422, platform.CodeInvalidRequest,
+		err := platform.NewError(422, platform.CodeInvalidRequest,
 			"没有可用于该能力的渠道凭据，请先在配置中心添加渠道与 API Key").
 			WithDetail("capability", capability)
+		// 把解析失败的真实原因一并给出：笼统的「没有可用凭据」在
+		// 「渠道没声明该能力 / 适配器没注册 / 密钥解不开」三种情况下
+		// 处理方式完全不同，而用户看到的却只有一句话。
+		if cause := a.resolver.LastError(); cause != nil {
+			err = err.WithDetail("reason", platform.Redact(cause.Error()))
+		}
+		return err
 	}
-	params["providerId"] = cred.ProviderID
+	// 回填的是**渠道行 id**（SourceProviderID），不是协议名：
+	// 执行期要用它再次解析到同一条渠道配置。写协议名会让「有两个
+	// 同协议渠道、用户选了 B」变成「实际用了 A」。
+	params["providerId"] = firstNonEmptyStr(cred.SourceProviderID, cred.ProviderID)
 	params["credentialId"] = cred.ID
+
+	// 自定义脚本的**静态校验**在提交前完成。
+	//
+	// 为什么不能等到异步执行时再报：脚本写错是**永久**错误（重试不会变好），
+	// 而异步报错的表现是「返回 202 + 一个立刻 failed 的 Run」——
+	// 用户需要去翻 Run 详情才知道「原来是脚本里写了个 eval」。
+	// 更糟的是「拒绝逃逸」这件事在异步路径上没有 HTTP 状态码可断言，
+	// 于是「拒绝生效」这条安全结论就没有可观测信号。
+	if script, ok := cred.Limits["script"].(string); ok && strings.TrimSpace(script) != "" {
+		analysis, err := sandbox.Analyze(script)
+		if err != nil {
+			return platform.NewError(422, platform.CodeInvalidRequest,
+				"渠道的调用脚本无法通过沙箱校验: "+platform.Redact(err.Error())).
+				WithDetail("providerId", cred.SourceProviderID)
+		}
+		if len(analysis.UnknownCalls) > 0 {
+			return platform.NewError(422, platform.CodeInvalidRequest,
+				"脚本调用了白名单外的函数: "+strings.Join(analysis.UnknownCalls, ", ")).
+				WithDetail("providerId", cred.SourceProviderID)
+		}
+		if len(analysis.Forbidden) > 0 {
+			return platform.NewError(422, platform.CodeForbidden,
+				"脚本包含被拒绝的写法: "+strings.Join(analysis.Forbidden, "; ")).
+				WithDetail("providerId", cred.SourceProviderID)
+		}
+	}
+	// 静态检查之外，还要跑一次「脚本 → 请求描述」的转换（不发请求）。
+	//
+	// 保留头部（Authorization）、主机越界、responsePath 缺失这三类问题
+	// 只有拿到**运行期入参**才能判定（例如 path 可能是变量拼出来的）。
+	// 放在提交前做，是为了让它们以 4xx 返回而不是「202 + 立刻失败的 Run」。
+	if err := a.Providers.ValidateProviderPlan(ctx, provider.Capability(capability), providerID, credID, params); err != nil {
+		return err
+	}
 	return nil
 }

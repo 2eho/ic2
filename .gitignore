@@ -9,14 +9,19 @@
 /upstream/
 # 分析用镜像：与 upstream/ 同类，用于「读原实现」而不是「引用原代码」。
 # 不入库，避免检查脚本与 code review 把它当成本仓库代码。
-research/
+/research/
 # 本地工具链与 Go module cache（跑 make check 的 Go 门禁用；不入库）
-.toolchain/
+/.toolchain/
 
-# 构建产物
-bin/
-dist/
-build/
+# 构建产物。
+#
+# 必须**锚定到仓库根**（`/bin/` 而不是 `bin/`）：非锚定规则会匹配任意层级的
+# 同名目录，把 `packages/plugin-sdk/bin/`（插件的构建脚本，是发布物）也忽略掉。
+# 这与上一轮 `upstream/` 误伤 `docs/upstream/` 是同一类问题——
+# 而且这次会直接让「SDK 少了构建脚本」，用户装了包却无法构建。
+/bin/
+/dist/
+/build/
 *.log
 coverage.out
 node_modules/
@@ -34,6 +39,11 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# 插件 SDK 的构建产物（由 `ic-plugin-build` 生成，不入库：
+# bundle 内容由源码与锁定的 SDK 版本决定，提交它只会产生无意义的 diff）
+packages/*/dist/
+packages/*/template/dist/
 
 # 编辑器
 .DS_Store

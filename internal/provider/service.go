@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/context-flow/ic/internal/api"
@@ -27,6 +29,8 @@ type Service struct {
 	client  platform.HTTPDoer
 	clock   platform.Clock
 	ids     platform.IDGen
+	// resolver 由装配层注入：ValidateProviderPlan 需要它拿适配器。
+	resolver *CredentialResolver
 }
 
 // Options 构造参数。
@@ -133,16 +137,33 @@ func (s *Service) CreateCredential(ctx context.Context, wsID, providerID string,
 	if s.secrets == nil {
 		return nil, platform.NewError(501, platform.CodeNotImplemented, "secret store is not configured")
 	}
-	if strings.TrimSpace(in.Secret) == "" {
-		return nil, platform.ErrInvalid("secret is required")
-	}
-	var baseURL string
+	// 先读渠道元数据：下面的「是否脚本渠道」判断需要它。
+	var baseURL, providerKind string
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT base_url FROM providers WHERE id = ? AND workspace_id = ?`, providerID, wsID).Scan(&baseURL); err != nil {
+		`SELECT base_url, kind FROM providers WHERE id = ? AND workspace_id = ?`, providerID, wsID).
+		Scan(&baseURL, &providerKind); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, platform.ErrNotFound("provider") // 不泄露存在性
 		}
 		return nil, platform.AsError(err)
+	}
+	// script 渠道可以没有密钥：脚本自己描述协议，鉴权由平台按 authKind 注入
+	//（可能是「不需要鉴权」的内网服务）。这里强制要求 secret 会让
+	// 「自定义脚本 + 无鉴权」这一合法组合直接不可配置 —— 而它的报错是
+	// 「secret is required」，与用户真正想做的事（保存脚本）毫无关系。
+	//
+	// 其余渠道仍然强制：它们全部依赖密钥，缺密钥只会在调用时失败。
+	isScript := strings.EqualFold(providerKind, "script")
+	if strings.TrimSpace(in.Secret) == "" && !isScript {
+		return nil, platform.ErrInvalid("secret is required")
+	}
+	if isScript {
+		// 反向约束：脚本渠道**必须**带脚本。允许一个没有脚本的脚本渠道，
+		// 用户会在生成时拿到「未配置调用脚本」——那时他已经在等结果了。
+		if script, _ := in.Limits["script"].(string); strings.TrimSpace(script) == "" {
+			return nil, platform.NewError(422, platform.CodeInvalidRequest,
+				"脚本渠道必须同时提供调用脚本（limits.script）")
+		}
 	}
 	sealed, err := s.secrets.Seal(in.Secret)
 	if err != nil {
@@ -397,6 +418,13 @@ type CredentialResolver struct {
 
 	mu       sync.RWMutex
 	adapters map[string]Adapter
+	// lastErr 记录最近一次解析失败的原因（原子替换，读多写少）。
+	//
+	// 用 atomic.Pointer[error] 而不是 atomic.Value：后者要求所有 Store
+	// 的值**类型完全一致**，而这里会存 *DomainError / *fmt.wrapError
+	// 等多种具体类型——实测会在第二次 Store 时 panic
+	//（"inconsistently typed value"），即「第一次失败正常、第二次崩溃」。
+	lastErr atomic.Pointer[error]
 }
 
 // NewCredentialResolver 构造解析器。
@@ -432,19 +460,190 @@ func (r *CredentialResolver) Adapter(providerID string) (Adapter, bool) {
 	return a, ok
 }
 
+// PlanValidator 是「在提交前校验脚本产出」的可选能力。
+//
+// 只有 script 适配器实现它。用类型断言而不是把它加进 Adapter 接口：
+// 其余适配器没有「用户提供的脚本」这一层，加一个永远返回 nil 的方法
+// 会让接口表达力下降（读者无法从中看出「谁会真的校验」）。
+type PlanValidator interface {
+	ValidatePlan(ctx context.Context, cred Credential, req Request) error
+}
+
+// ValidateProviderPlan 在提交前跑一次脚本，校验产出的请求描述。
+//
+// 只在脚本渠道上有意义（PlanValidator 由 script 适配器实现）。
+// 返回 nil 表示「要么不是脚本渠道，要么校验通过」——调用方不需要分支。
+func (s *Service) ValidateProviderPlan(ctx context.Context, cap Capability, providerID, credentialID string, params map[string]any) error {
+	adapter, cred, ok := s.Resolver().Resolve(cap, providerID, credentialID)
+	if !ok || adapter == nil {
+		return nil
+	}
+	pv, ok := adapter.(PlanValidator)
+	if !ok {
+		return nil
+	}
+	prompt, _ := params["prompt"].(string)
+	inner, _ := params["params"].(map[string]any)
+	count, _ := params["outputCount"].(int)
+	refs := stringSliceFrom(params["references"])
+	inputs := make([]ResolvedInput, 0, len(refs))
+	for i, id := range refs {
+		inputs = append(inputs, ResolvedInput{Kind: "image", AssetID: id, Label: "图片" + itoaStr(i+1)})
+	}
+	err := pv.ValidatePlan(ctx, cred, Request{
+		Capability: cap, Model: stringFrom(params["model"]), Prompt: prompt,
+		Params: inner, Count: count, Inputs: inputs,
+	})
+	return asDomain(err)
+}
+
+// asDomain 把适配器错误映射成领域错误。
+//
+// 为什么必须有这一层：适配器返回的是 `*provider.ProviderError`，
+// 而它对 HTTP 层是**未知类型**——`writeError` 会把任何非 DomainError
+// 转成 500「internal error」。于是一个「脚本写了保留头部」这种
+// 纯用户输入问题，会以「平台内部错误」的面目出现。
+//
+// 映射规则：
+//
+//	ClassPermanent + CodeInvalidRequest  → 422
+//	ClassPermanent + CodeForbidden       → 403
+//	ClassPermanent + 其它                → 400
+//	ClassRateLimited                     → 429
+//	ClassTransient                       → 502（上游暂时不可用）
+//
+// 刻意保留原始 Code：它是稳定契约（前端按 code 查文案），
+// 换成 HttpStatus 命名会破坏这一层。
+func asDomain(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pe *ProviderError
+	if !errors.As(err, &pe) {
+		return err
+	}
+	status := 400
+	switch {
+	case pe.Class == ClassRateLimited:
+		status = 429
+	case pe.Class == ClassTransient:
+		status = 502
+	case pe.Code == platform.CodeForbidden:
+		status = 403
+	case pe.Code == platform.CodeInvalidRequest, pe.Code == platform.CodeInvalidSpec:
+		status = 422
+	}
+	de := platform.NewError(status, pe.Code, pe.Message)
+	if pe.HTTPStatus != 0 {
+		de = de.WithDetail("upstreamStatus", pe.HTTPStatus)
+	}
+	return de
+}
+
+// Resolver 返回内部解析器（装配层在构造后需要注册适配器）。
+func (s *Service) Resolver() *CredentialResolver { return s.resolver }
+
+// SetResolver 注入解析器（装配期调用一次）。
+func (s *Service) SetResolver(r *CredentialResolver) { s.resolver = r }
+
+func stringFrom(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func stringSliceFrom(v any) []string {
+	list, ok := v.([]string)
+	if ok {
+		return list
+	}
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func itoaStr(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	digits := ""
+	for n > 0 {
+		digits = string(rune('0'+n%10)) + digits
+		n /= 10
+	}
+	return digits
+}
+
 // Resolve 见 exec.AdapterRegistry：按能力与优先级挑选凭据。
+//
+// 失败时**把原因记下来**（ResolveError）：签名只有 bool，调用方只能报
+// 「没有可用凭据」，而真实原因可能是「渠道没声明该能力」「适配器没注册」
+// 「密钥解不开」——三者的处理方式完全不同。
+// 曾经这里静默丢弃 err，于是 e2e 里「凭据齐全却报没有凭据」无法定位。
 func (r *CredentialResolver) Resolve(cap Capability, providerID, credentialID string) (Adapter, Credential, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cred, err := r.svc.resolveCredentialFor(ctx, cap, providerID, credentialID)
 	if err != nil {
+		storeErr(&r.lastErr, err)
 		return nil, Credential{}, false
 	}
 	a, ok := r.Adapter(cred.ProviderID)
 	if !ok {
+		storeErr(&r.lastErr, fmt.Errorf("渠道 %s 的协议 %q 没有注册适配器（已注册：%v）",
+			cred.SourceProviderID, cred.ProviderID, r.registeredIDs()))
 		return nil, Credential{}, false
 	}
+	// 必须存一个**具体**的 error 值：atomic.Value 的 Store(nil) 会 panic
+	//（"store of nil value into Value"），而这是一个会被 recover 中间件
+	// 转成 500 的崩溃。用哨兵值表示「上次成功」。
+	storeErr(&r.lastErr, errNone)
 	return a, cred, true
+}
+
+// storeErr 把 error 放进 atomic.Pointer[error]。
+//
+// 需要一个**中间变量**：`atomic.Pointer[T].Store` 要求的是 *T，
+// 直接传 `err`（接口值）会被编译器拒绝；而 `&err` 在 err 是 nil 时
+// 仍然合法（指针非 nil，指向一个 nil 接口值），因此这里不需要额外判空。
+func storeErr(slot *atomic.Pointer[error], err error) {
+	slot.Store(&err)
+}
+
+// LastError 返回最近一次 Resolve 失败的原因（成功时返回 nil）。
+//
+// 用于把「没有可用凭据」这条笼统错误变成可行动的原因。刻意不返回
+// 凭据本身：调用方只需要「为什么失败」。
+func (r *CredentialResolver) LastError() error {
+	p := r.lastErr.Load()
+	if p == nil || *p == nil || errors.Is(*p, errNone) {
+		return nil
+	}
+	return *p
+}
+
+// errNone 是「上次解析成功」的哨兵。
+//
+// 用意：atomic.Value 不允许存 nil，而「成功」这个状态必须能表达
+// （否则 LastError 会一直返回上一次的失败原因，把已修好的问题报成当前问题）。
+var errNone = errors.New("no error")
+
+func (r *CredentialResolver) registeredIDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.adapters))
+	for k := range r.adapters {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SaveModels 保存渠道下勾选的模型与能力（见 api.ModelSaver）。
@@ -488,8 +687,14 @@ func (s *Service) SaveModels(ctx context.Context, wsID, providerID string, model
 
 // resolveCredentialFor 按能力找渠道 → 取最高优先级凭据 → 解密。
 func (s *Service) resolveCredentialFor(ctx context.Context, cap Capability, providerID, credentialID string) (Credential, error) {
+	// 选 p.kind（协议名）而不是 p.id：适配器按**协议**注册（openai/gemini/script），
+	// 而 p.id 是用户可自定义的渠道标识（`my-relay`、`dbg-1789...`）。
+	// 曾经这里返回 p.id 作为 ProviderID，于是「适配器注册表里找不到它」，
+	// 表现是「凭据齐全却报没有可用凭据」——而报错内容与真实原因毫无关系。
+	// 只有种子里恰好用 `openai` 作渠道 id 时看起来正常，所以这个缺陷
+	// 一直没被本地用例发现（e2e 用自定义 id 才暴露）。
 	query := `
-		SELECT p.id, p.base_url, p.auth_kind, c.id, c.secret_ref, c.priority
+		SELECT p.id, p.kind, p.base_url, p.auth_kind, c.id, c.secret_ref, c.priority, COALESCE(c.limits, '{}')
 		FROM providers p
 		JOIN provider_credentials c ON c.provider_id = p.id AND c.enabled = 1
 		WHERE p.enabled = 1 AND c.workspace_id = p.workspace_id`
@@ -509,35 +714,55 @@ func (s *Service) resolveCredentialFor(ctx context.Context, cap Capability, prov
 		return Credential{}, platform.AsError(err)
 	}
 	defer rows.Close()
+	n := 0
+	// lastReason 累积「为什么这些候选都不行」，用于把笼统的
+	// 「没有可用凭据」变成可行动的原因（渠道没声明能力 / 密钥解不开）。
+	lastReason := ""
 	for rows.Next() {
+		n++
 		var (
-			pid, baseURL, authKind, cid, sealedRef string
-			priority                               int
+			pid, kind, baseURL, authKind, cid, sealedRef string
+			limitsRaw                                    string
+			priority                                     int
 		)
-		if err := rows.Scan(&pid, &baseURL, &authKind, &cid, &sealedRef, &priority); err != nil {
+		if err := rows.Scan(&pid, &kind, &baseURL, &authKind, &cid, &sealedRef, &priority, &limitsRaw); err != nil {
 			return Credential{}, platform.AsError(err)
+		}
+		// limits 解析失败不阻断取凭据：它承载的是「怎么调这个渠道」这类
+		// 配置，缺了它应当表现为「该渠道提示需要配置脚本」，而不是
+		// 「整个渠道不可用」——后者会让用户以为凭据丢了。
+		limits := map[string]any{}
+		if limitsRaw != "" {
+			_ = json.Unmarshal([]byte(limitsRaw), &limits)
 		}
 		// 能力过滤放在 Go 侧：capabilities 是逗号分隔文本，SQL 里做集合匹配会失去可读性，
 		// 而候选集只有几十行，性能不是问题。
 		caps, err := s.providerCapabilities(ctx, pid)
 		if err != nil {
+			lastReason = fmt.Sprintf("渠道 %s 的能力读取失败: %v", pid, err)
 			continue
 		}
 		if !contains(caps, string(cap)) {
+			lastReason = fmt.Sprintf("渠道 %s 未声明能力 %s（已声明：%v）", pid, cap, caps)
 			continue
 		}
 		secret, err := s.secrets.Open(sealedRef)
 		if err != nil {
-			// 单个凭据解不开（例如轮换期用错密钥）不应让所有渠道不可用：
-			// 跳过并继续找下一个，但要把原因暴露出来（不静默）。
-			return Credential{}, err
+			lastReason = "凭据解密失败: " + platform.Redact(err.Error())
+			continue
 		}
 		return Credential{
-			ID: cid, ProviderID: pid, BaseURL: baseURL, AuthKind: authKind,
-			Secret: secret, Priority: priority,
+			// ProviderID 是**协议名**（用于选适配器）；渠道行 id 记在 SourceProviderID。
+			ID: cid, ProviderID: firstNonEmpty(kind, "custom"), SourceProviderID: pid,
+			BaseURL: baseURL, AuthKind: authKind,
+			Secret: secret, Priority: priority, Limits: limits,
 		}, nil
 	}
-	return Credential{}, platform.NewError(422, platform.CodeInvalidRequest, "没有可用凭据，请先在配置中心添加渠道与 API Key")
+	if lastReason == "" {
+		lastReason = fmt.Sprintf("没有匹配的渠道与凭据（cap=%s providerId=%q credentialId=%q，候选行=%d）",
+			cap, providerID, credentialID, n)
+	}
+	return Credential{}, platform.NewError(422, platform.CodeInvalidRequest, lastReason)
 }
 
 func (s *Service) providerCapabilities(ctx context.Context, pid string) ([]string, error) {

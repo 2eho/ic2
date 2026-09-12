@@ -1,11 +1,16 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/shared/api";
+import { ImageLightbox } from "@/shared/components/ImageLightbox";
 import type { TFn } from "@/app/App";
 
 /** 首页：版本信息 + 提示词展示墙 + 快速入口。 */
 export function HomePage({ t }: { t: TFn }) {
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.meta });
+  // 预览的封面地址（1.1）：点卡片打开大图，而非跳走。
+  // 用 URL 而不是「提示词对象」作为状态：这样提示词列表刷新后预览不会失效。
+  const [preview, setPreview] = useState<string | null>(null);
   const prompts = useQuery({
     queryKey: ["prompts", "home"],
     queryFn: () => api.searchPrompts("", "", [], 12),
@@ -83,8 +88,22 @@ export function HomePage({ t }: { t: TFn }) {
                 {p.coverUrl && (
                   <img
                     src={p.coverUrl}
-                    alt=""
-                    style={{ width: "100%", borderRadius: 6, marginBottom: 8 }}
+                    alt={p.title}
+                    role="button"
+                    tabIndex={0}
+                    title={t("prompts.preview")}
+                    onClick={() => setPreview(p.coverUrl ?? null)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        setPreview(p.coverUrl ?? null);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      borderRadius: 6,
+                      marginBottom: 8,
+                      cursor: "zoom-in",
+                    }}
                   />
                 )}
                 <strong style={{ fontSize: 13 }}>{p.title}</strong>
@@ -101,6 +120,13 @@ export function HomePage({ t }: { t: TFn }) {
           <div className="ic-empty">{t("common.empty")}</div>
         )}
       </section>
+
+      {preview && (
+        <ImageLightbox
+          src={preview}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

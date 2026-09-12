@@ -228,10 +228,18 @@ func applySetSpec(doc *CanvasDocument, p *SetSpecPayload) (json.RawMessage, erro
 	if !ok {
 		return nil, NewError(404, CodeNotFound, "node not found").WithDetail("id", p.ID)
 	}
-	prev := cloneSpec(n.Spec)
-	if len(p.Patch) == 0 && len(p.Unset) == 0 {
-		return nil, NewError(422, CodeInvalidSpec, "set_spec requires patch or unset")
+	// meta 与 spec 是两条独立通道：可以只改 meta（Agent 的 canvas_update_node
+	// 就常这样用），因此存在性检查必须按通道分别判定，否则
+	//「只改 metadata」会被当成「没有要改的东西」而拒绝。
+	hasSpecChange := len(p.Patch) > 0 || len(p.Unset) > 0
+	hasMetaChange := len(p.Meta) > 0 || len(p.MetaUnset) > 0
+	if !hasSpecChange && !hasMetaChange {
+		return nil, NewError(422, CodeInvalidSpec, "set_spec requires patch/unset or meta/metaUnset")
 	}
+	if hasMetaChange {
+		return applySetMeta(doc, p)
+	}
+	prev := cloneSpec(n.Spec)
 	next := cloneSpec(n.Spec)
 	for _, k := range p.Unset {
 		if _, allowed := schemaField(n.Type, k); !allowed {
@@ -261,6 +269,79 @@ func applySetSpec(doc *CanvasDocument, p *SetSpecPayload) (json.RawMessage, erro
 		}
 	}
 	return marshal(map[string]any{"kind": OpSetSpec, "id": p.ID, "patch": prev, "unset": unset}), nil
+}
+
+// applySetMeta 修改节点扩展元数据。
+//
+// meta 是**明确不参与执行**的扩展位（见 02-domain-model）：它让 Agent
+// 与插件可以存自己的标记，而不会被误认为能影响生成。
+// 因此这里不做字段白名单（那会限制它的用途），但做三件事：
+//
+//  1. 键名过原型链检查（`__proto__` 等会随 JSON 序列化传播到前端，
+//     在那里被 JSON.parse 成真实对象时才会生效 —— 跨边界污染）；
+//  2. 键名长度与数量上限（meta 会进画布文档，无上限就是一个隐形数据库）；
+//  3. 删除必须显式列键，传空对象**不**清空（与 spec 的一致语义）。
+func applySetMeta(doc *CanvasDocument, p *SetSpecPayload) (json.RawMessage, error) {
+	n := doc.Nodes[p.ID]
+	prev := map[string]any{}
+	for k, v := range n.Meta {
+		prev[k] = v
+	}
+	next := map[string]any{}
+	for k, v := range n.Meta {
+		next[k] = v
+	}
+	removed := []string{}
+	for _, k := range p.MetaUnset {
+		if err := validateMetaKey(k); err != nil {
+			return nil, err
+		}
+		if _, ok := next[k]; ok {
+			removed = append(removed, k)
+		}
+		delete(next, k)
+	}
+	for k, v := range p.Meta {
+		if err := validateMetaKey(k); err != nil {
+			return nil, err
+		}
+		if v == nil {
+			// null 不接受：显式删除走 metaUnset，与 spec 的 unset 同一条纪律。
+			return nil, NewError(422, CodeInvalidSpec, "meta value must not be null; use metaUnset").
+				WithDetail("key", k)
+		}
+		next[k] = normalizeJSONNumbers(v)
+	}
+	if len(next) > MaxMetaKeys {
+		return nil, NewError(413, CodePayloadTooLarge, "meta has too many keys").
+			WithDetail("limit", MaxMetaKeys).WithDetail("actual", len(next))
+	}
+	if len(next) == 0 {
+		n.Meta = nil
+	} else {
+		n.Meta = next
+	}
+	doc.Nodes[p.ID] = n
+	return marshal(map[string]any{
+		"kind": OpSetSpec, "id": p.ID, "meta": prev, "metaUnset": removed,
+	}), nil
+}
+
+// validateMetaKey 校验 meta 键名。
+func validateMetaKey(k string) error {
+	if k == "" {
+		return NewError(422, CodeInvalidSpec, "meta key must not be empty")
+	}
+	if len(k) > MaxMetaKeyLen {
+		return NewError(422, CodeInvalidSpec, "meta key too long").
+			WithDetail("limit", MaxMetaKeyLen).WithDetail("key", k)
+	}
+	switch k {
+	// 原型链相关键：沙箱里看起来无害，但会在前端被 JSON.parse 成对象后生效。
+	case "__proto__", "constructor", "prototype":
+		return NewError(422, CodeInvalidSpec, "meta key 不能是原型链相关键").WithDetail("key", k)
+	}
+	return nil
 }
 
 func schemaField(t NodeTypeID, k string) (FieldKind, bool) {

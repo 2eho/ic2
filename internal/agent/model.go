@@ -157,6 +157,34 @@ type Session struct {
 	CreatedAt   time.Time      `json:"createdAt"`
 }
 
+// SessionSnapshot 是随画布导出的只读会话快照（2.11）。
+type SessionSnapshot struct {
+	ID        string         `json:"id"`
+	CanvasID  string         `json:"canvasId"`
+	ThreadID  string         `json:"threadId,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
+	Turns     []TurnSnapshot `json:"turns"`
+}
+
+// TurnSnapshot 是一轮对话的快照。
+type TurnSnapshot struct {
+	Seq    int            `json:"seq"`
+	Status string         `json:"status"`
+	Input  string         `json:"input"`
+	Items  []ItemSnapshot `json:"items"`
+}
+
+// ItemSnapshot 是条目的裁剪表示。
+type ItemSnapshot struct {
+	Kind string    `json:"kind"`
+	Text string    `json:"text,omitempty"`
+	At   time.Time `json:"at"`
+	// Redacted 表示「这条存在但内容未导出」。显式标记而不是留空：
+	// 用户能看出「当时发生过工具调用」，而不是以为会话不完整。
+	Redacted bool `json:"redacted,omitempty"`
+}
+
 // ToolCallResult 是工具执行结果（对齐 docs/design/07 §4）。
 type ToolCallResult struct {
 	CallID  string          `json:"callId"`

@@ -41,3 +41,15 @@ const MaxEdgesPerCanvas = 400_000
 
 // IDRe 说明：ID 校验见 id.go，格式 ^[A-Za-z0-9_-]{1,64}$。
 const MaxIDLen = 64
+
+// 节点扩展元数据（Node.Meta）的边界。
+//
+// Meta 是「明确不参与执行」的扩展位，但它会进画布文档、进导出包、
+// 进每一次快照传输。没有上限时它会变成隐形数据库：
+// 用户往里塞图片 base64，之后导出/同步/快照全部变慢，而没人知道为什么。
+const (
+	// MaxMetaKeys 单节点 meta 键数量上限。
+	MaxMetaKeys = 64
+	// MaxMetaKeyLen 单个 meta 键名长度上限。
+	MaxMetaKeyLen = 128
+)

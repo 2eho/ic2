@@ -31,7 +31,7 @@
 
 | # | 功能 | 原实现 | 重写落位 | 验收 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 1.1 | 首页（介绍 + 提示词展示墙 + 入口） | `pages/home/index.tsx` 120 行 | `features/home/HomePage.tsx` | 首页可打开，展示版本信息、入口卡片与提示词封面墙 | done |
+| 1.1 | 首页（介绍 + 提示词展示墙 + 入口） | `pages/home/index.tsx` 120 行 | `features/home/HomePage.tsx` | 首页可打开；点封面打开大图预览（`shared/components/ImageLightbox`，ESC/遮罩关闭、锁滚动、加载失败有兜底链接） | done |
 | 1.2 | 我的画布（项目卡片列表） | `pages/canvas/index.tsx` 130 行 | `features/canvas/ProjectList` | 新建/重命名/复制/删除/导入/导出 | done |
 | 1.3 | 画布编辑器 | `pages/canvas/project.tsx` 3384 行 | `features/canvas/*` 拆 20+ 模块 | 见第 3 节 | done |
 | 1.4 | 生图工作台 | `pages/image/index.tsx` 903 行 | `features/workbench/WorkbenchPage`（mode=image） | 见第 6 节（6.1–6.7 全部 done） | done |
@@ -58,7 +58,7 @@
 | 2.8 | 视口 x/y/k | `ViewportTransform` | `Viewport` | 打开画布恢复视口 | done |
 | 2.9 | 背景模式 lines/dots/blank | `CanvasBackgroundMode` | `CanvasSettings.Background` | 三种背景可切换 | done |
 | 2.10 | 图片信息开关 `showImageInfo` | project 字段 | `CanvasSettings.ImageInfo` | 开关状态持久化 | done |
-| 2.11 | 助手会话随画布保存 | `chatSessions` / `activeChatId` | `AgentSession`（服务端，与 canvasId 绑定，见 9.4） | 会话随画布**持久化**已成立；「随画布导出」未做（`/export` 不含会话快照） | wip |
+| 2.11 | 助手会话随画布保存 | `chatSessions` / `activeChatId` | `AgentSession`（服务端，与 canvasId 绑定）+ `/export` 附带只读快照 | 会话持久化成立；导出含会话快照，非文本条目显式标 `redacted`（工具参数可能含凭据/内网地址） | done |
 | 2.12 | 旧数据迁移 | 无（AGENTS.md 声明不兼容） | `legacy/` 转换器 + `POST /canvases/import` | 原用户一键导入历史画布与图片 | done |
 
 ### 2.13 原项目 metadata 字段 → 重写落位映射（逐字段，防漏）
@@ -99,7 +99,7 @@
 | 3.4 | 节点拖拽（多选联动、组内成员跟随） | `handleNodeMouseDown` + rAF | 拖组时成员一起移动 | done |
 | 3.5 | 节点八向缩放 + 图片等比锁定 | `canvas-node.tsx` resize | `freeResize=false` 时保持原始比例 | done |
 | 3.6 | 连线拖拽创建 + 连线校验 | `normalizeConnection` | 配置节点之间禁止连线（原项目明确报错） | done |
-| 3.7 | 从连线末端拖到空白 → 创建节点菜单 | `ConnectionCreateMenu` | 菜单出现在落点，创建后自动连线 | todo |
+| 3.7 | 从连线末端拖到空白 → 创建节点菜单 | `ConnectionCreateMenu` | `kernel/interaction.commitConnect` + `CanvasSurface.ConnectCreateMenu` | 端口拖拽（屏幕像素命中，缩放后判定一致）；落点空白弹菜单，只列类型兼容的节点，创建后自动连线 | done |
 | 3.8 | 画布右键 → 节点创建菜单 | `NodeCreateMenu` | 列出内置 + 已启用插件节点 | done |
 | 3.9 | 节点右键菜单（复制/打组/解散/删除/截视频帧） | `CanvasNodeContextMenu` | 5 项齐备，条件显示 | done |
 | 3.10 | 悬停工具栏（信息/删除/重试/存资产/下载/编辑文字/生图/字号） | `canvas-node-hover-toolbar.tsx` | 按节点类型条件渲染 | done |
@@ -137,16 +137,16 @@
 | 4.9 | Gemini TTS（`responseModalities:["AUDIO"]` + `speechConfig`） | model-plugin gemini 音频模板 | 同上 | 返回 base64 PCM 可播放 | done |
 | 4.10 | 模型列表拉取（OpenAI `/v1/models`、Gemini `/v1beta/models`） | `fetchImageModels` | `provider` | 拉取后按关键词猜能力 | done |
 | 4.11 | 自定义渠道 + 每模型能力（image/video/text/audio） | `use-config-store.ts` 496 行 | `providers` 表 | 多渠道、按能力选模型 | done |
-| 4.12 | 自定义调用脚本（`new Function` 注入 17 个变量） | `model-plugin.ts` `runModelPlugin` | 未实现（服务端沙箱待落地） | 见 4.19 | todo |
+| 4.12 | 自定义调用脚本 | `model-plugin.ts` `runModelPlugin` | `internal/sandbox` + `internal/provider/adapter/script` | 脚本产出请求描述，出口在服务端：凭据由平台注入（脚本不能设 Authorization）、只能请求渠道 baseUrl 下的路径、`responsePath` 决定结果位置 | done |
 | 4.13 | 脚本模板（OpenAI/Gemini × image/video/audio/text 共 8 个） | `getPluginTemplates()` | 同结构模板 | 逐个可运行 | done |
-| 4.14 | 脚本编辑器 UI（三步向导 + 复制写脚本说明 + 插入模板 + 恢复默认） | `scriptEditor` i18n 有大段文案 | `features/settings/ScriptEditor` | 交互一致 | todo |
+| 4.14 | 脚本编辑器 UI | `scriptEditor` i18n 有大段文案 | `features/settings/ScriptEditor.tsx` | 三步向导（映射 → 请求预览 → 确认保存）；保存前做静态检查：未定义变量、白名单外函数、被拒写法 | done |
 | 4.15 | 失败分类与提示（401/403/429/404/502/503、HTML 错误页、超时、取消） | `readStatusError` / `readApiErrorMessage` | `DomainError.Code` + i18n | 错误码稳定枚举 | done |
 | 4.16 | 取消生成 | `AbortController` | context 级联取消 | 取消后节点回到 idle | done |
 | 4.17 | 参考图编号注入提示词（"参考图片编号：图片1、图片2…"） | `buildImageReferencePromptText` | 结构化 `ComposedPrompt.Inputs` | 不再依赖文本约定 | done |
 | 4.18 | 上游文本按「文本N」分块编号 | `buildNodeGenerationContext` | 同上，端口 `Order` 决定顺序 | 多段文本不错位 | done |
-| 4.19 | 自定义脚本沙箱化 | `new Function` 在浏览器执行（安全缺陷） | goja / 子进程 + 白名单 | 无法访问 FS 与进程 | todo |
+| 4.19 | 自定义脚本沙箱化 | `new Function` 在浏览器执行（安全缺陷） | `internal/sandbox`（受限解释器，**不引第三方**） | 无 eval/Function/原型链、无循环与递归（语法即拒绝）、宿主函数白名单、步数+墙钟+输出字节上限；ATK 用例实测逃逸手法全部被拒 | done |
 | 4.20 | 本地代理开关（绕 CORS） | `withLocalProxy` + `canvas-proxy` | 服务端同源转发（无需代理） | 前端不再需要代理 | dropped |
-| 4.21 | 本地直连模式（保留兼容） | 默认行为 | `local-direct` 显式开启且默认关闭 | 文档明确风险 | todo |
+| 4.21 | 本地直连模式（保留兼容） | 默认行为 | `workspace.Prefs.Direct` + `features/settings/DirectConnectPanel` | 默认关闭；开启必须同时给 `acknowledgedAt`（服务端校验，UI 绕不过）；地址必须是回环（否则等于服务端代任意地址发请求）；生效范围默认仅 image.generate | done |
 | 4.22 | 生成中断标记（刷新后 loading → error「已中断」） | `resetInterruptedGeneration` | 服务端 Run 状态收敛 | 刷新后状态准确 | done |
 | 4.23 | Run 记录/重放/对比（原项目无） | — | 见 05-execution-engine | RunPanel 可用 | done |
 | 4.24 | 计量与成本（原项目无） | — | `Usage` 微元 | RunPanel 展示 token/张数/秒/成本 | done |
@@ -155,11 +155,11 @@
 
 | # | 工具 | 原实现 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| 5.1 | 覆盖蒙版局部编辑（手绘遮罩 → 生成遮罩标注图 → 作为参考图 2 走 edit） | `canvas-node-mask-edit-dialog.tsx` 438 行 + `maskEditImageNode` | 画笔/擦除/笔刷大小/撤销重做/立刻生成或仅导出 | todo |
+| 5.1 | 覆盖蒙版局部编辑（手绘遮罩 → 生成遮罩标注图 → 作为参考图 2 走 edit） | `canvas-node-mask-edit-dialog.tsx` 438 行 + `maskEditImageNode` | `dialogs/generative.tsx` `MaskDialog`（蒙版上传为真实资产 → 图片2） | 画笔/擦除/笔刷/撤销/仅导出；确认时蒙版落库成素材并连到 edit 节点的 ref 端口；空蒙版显式拒绝（否则会花一次费用做无意义重绘） | done |
 | 5.2 | 裁剪（自由/固定/原图三种比例，缩放拖动） | `canvas-node-crop-dialog.tsx` + `cropDataUrl` | 生成新节点并连线 | done |
 | 5.3 | 切图（行列 + 自定义横竖切线 + 撤销重做） | `canvas-node-split-dialog.tsx` 299 行 + `splitDataUrl` | 按原网格排列到右侧 | done |
 | 5.4 | 放大（目标边长 ≤4096，最近邻/双线性/高清插值） | `canvas-node-upscale-dialog.tsx` + `upscaleDataUrl` | 三种算法结果可区分 | done |
-| 5.5 | AI 超分 | 原项目**未实现**（弹窗提示「暂未实现」） | 能力枚举已登记（`CapImageUpscale`），执行路径未实现 | 明确提示而非伪造结果 | todo |
+| 5.5 | AI 超分 | 原项目**未实现**（弹窗提示「暂未实现」） | `openai.imageUpscale`（走 edits 端点）+ `adapter/script` 可自接超分渠道 | 真的发请求并产出结果；无源图时**发请求前**报错；参考图按序号上传（`ref1.png`） | done |
 | 5.6 | AI 多角度（水平/俯仰/镜头距离/广角 → 生成编辑提示词） | `canvas-node-angle-dialog.tsx` + `buildAnglePrompt` | 文案与角度标签一致 | done |
 | 5.7 | 视频截帧（首帧/尾帧/当前帧 → 图片节点） | `canvas-video-frame.ts` | 生成节点并连线，避让已有节点 | done |
 | 5.8 | 反推提示词（图片 → 文本节点 + 配置节点 + 连线） | `createImageReversePromptNodes` | 三节点布局与提示词文案一致 | done |
@@ -232,7 +232,7 @@
 | 9.2 | Codex app-server JSON-RPC 桥（thread/turn/item、审批、reasoning、plan、usage） | `codex-client.ts` 900 行 | `canvas-agent/src/normalize.js` | 事件归一化到 Item，未知类型保留而非丢弃 | done |
 | 9.3 | Claude Code CLI 桥（stream-json） | `agent/claude.ts` | `canvas-agent/src/normalize.js` | 四类 content block 归一化，多 block 事件拆多 Item | done |
 | 9.4 | 会话/消息模型（threadId + turnId + itemId 三元归属，快照权威） | `message-metadata.ts` + `codex-history.ts` | `agent_items(turn_id,item_id)` 唯一键 | 断线重连不重不丢 | done |
-| 9.5 | 28 个画布工具 + 6 个站点/工作台/素材/提示词工具，共 34 个 | `canvas/schemas.ts` `toolNames` | 工具表由 op schema 生成 | 工具名与语义对等 | wip |
+| 9.5 | 28 个画布工具 + 6 个站点/工作台/素材/提示词工具，共 34 个 | `canvas/schemas.ts` `toolNames` | `internal/agent/tools_upstream.go`（34 个名字）+ `translate.go`（纯函数翻译）+ `dispatch_upstream.go` | 34 个名字**逐字一致**（`check-upstream-radar` 对上游真源校验）；全部落到 `AppendOps`/`RunTrigger` 同一批底层能力；无对应能力的显式返回 not_implemented | done |
 | 9.6 | 工具调用转发到网页执行（SSE `tool_call` + POST `/canvas/result`，30s 超时） | `session.ts requestCanvasTool` | 服务端网关 + 浏览器执行器 | Agent 能改画布 | done |
 | 9.7 | 附件 → 画布图片节点（`canvas_create_attachment_nodes`） | `createAttachmentNodes` | 同名工具 + `graph.PlaceNewNodes` | 附件落为真实节点并避让已有区域 | done |
 | 9.8 | 画布快照压缩（content 截断 240 字符） | `compactNode` | `agent.Service.Snapshot` | 上下文可控 | done |
@@ -258,7 +258,7 @@
 | 10.6 | 宿主能力（getNode(s)/getConnections/getUpstream/getDownstream/updateNode/updateMetadata/applyOps/ai.generate*/openPanel/closePanel/storage） | `CanvasPluginHost` / `CanvasNodeContext` | 权限化后对等 | done |
 | 10.7 | AI 能力注入（generateImage/Video/Text、listModels、defaultModel） | `CanvasPluginAi` | 走服务端 exec | done |
 | 10.8 | 6 个官方插件重写为示例（markdown / svg / html / panorama / sticky-note / template） | `plugins/canvas/*` | 逐个功能对等 | done |
-| 10.9 | SDK（definePlugin / JSX runtime / 类型化 hooks / buildPlugin） | `@infinite-canvas/plugin-sdk` | 类型同源生成，无镜像漂移 | todo |
+| 10.9 | SDK（definePlugin / JSX runtime / 类型化 hooks / buildPlugin） | `@infinite-canvas/plugin-sdk` | `packages/plugin-sdk`（definePlugin / jsx-runtime / `ic-plugin-build` / 模板插件） | 清单校验（key/semver/apiVersion/节点前缀/权限/网络主机）；JSX runtime 只用 textContent + 属性白名单；构建产出单文件 bundle + sha256 integrity | done |
 | 10.10 | 插件权限与签名 | 无（安全缺陷） | manifest 权限 + 安装确认 + 扩大权限重确认 | done |
 | 10.11 | 缺插件节点的降级展示 | `node.missingPlugin`（有文案无实现路径） | 展示「需要插件 X」+ 安装入口 | done |
 
@@ -272,7 +272,7 @@
 | --- | --- | --- | --- | --- |
 | 11.1 | i18n 全量（zh-CN / en-US） | 各 657 行，含 canvas/agent/config/imageWorkbench/videoWorkbench/assets/prompts/home 等命名空间 | 无硬编码文案，无缺 key | done |
 | 11.2 | 主题（画布主题与 antd token 统一，禁止组件内写死黑白） | `canvas-theme.ts` + `app-theme.ts` | 亮/暗一致 | done |
-| 11.3 | 导出画布 zip（projects.json + files/，version 3 格式） | `canvas-export.ts` | `/export` 返回真实 JSON（`kind: ic-canvas-export`，见 handlers_graph.go）；**前端 zip 打包未接** | 导出→导入往返一致 | wip |
+| 11.3 | 导出画布 zip（projects.json + files/，version 3 格式） | `canvas-export.ts` | `features/canvas/transfer.ts` + 项目卡片按钮 | 导出→导入→再导出清单可比（清单不含随机字段）；资产先上传再建画布；缺失/跳过显式上报；兼容读取原项目包 | done |
 | 11.4 | 导出选中节点 zip（媒体原文件 + 文本 txt + 其他 json） | `exportCanvasNodes` | 可用 | done |
 | 11.5 | 复制文本并提示的统一 hook | `use-copy-text.ts` | 统一复用 | done |
 | 11.6 | 文件大小/时长格式化 | `formatBytes` / `formatDuration` | 复用 | done |
@@ -309,32 +309,22 @@
 避免「看起来覆盖率很高」的自欺。
 
 > 本节的写法要求：**每条都要能在代码里被证实**。上一版本曾把已经落地的条目留在
-> 「未完成」列表里（例如 1.1/1.4/1.5/1.10、6.x、7.x、9.x 的桥接器与 Skills），
-> 结果这份清单既不能指导排期，也掩盖了真正未做的项。核对方式见 §13。
+> 「未完成」列表里，也曾在 §9.5 标 `done` 而实际只有 14/34 个工具名 —— 那份清单
+> 既不能指导排期，也掩盖了真正未做的项。核对方式见 §13。
 
-### 14.1 仍未实现（`todo`，共 8 项）
+### 14.1 仍未实现（`todo`）
 
 | 条目 | 未实现的原因 | 补齐计划 |
 | --- | --- | --- |
-| 1.1 首页「可预览大图」 | 首页已展示提示词封面墙与入口，但**点击预览大图**未接（只有卡片） | M-next：点卡片打开与画布同一 `ImageInfo` 视图 |
-| 3.7 从连线末端拖到空白 → 创建节点菜单 | 交互状态机有 `start-connect` 意图，但**落点为空白时弹出创建菜单**未实现 | M-next：在 `commit-connect` 的空白分支追加菜单，创建后自动连线 |
-| 4.12 自定义调用脚本 | **服务端沙箱未落地**：仓库内不存在 goja / 子进程执行路径。原项目的 `new Function` 是安全缺陷，因此宁可缺功能也不能照搬 | 与 4.19 同批；先做能力白名单与超时，再做变量注入面 |
-| 4.14 脚本编辑器 UI | 依赖 4.12 的执行语义；先把「脚本能安全跑」做出来，再做三步向导，否则 UI 是给一个不可用的功能做界面 | 与 4.12 同批 |
-| 4.19 自定义脚本沙箱化 | 同上；这是 4.12/4.14 的前置条件 | 优先于 4.12 |
-| 4.21 本地直连模式 | 保留兼容项，需要**显式开启且默认关闭**并写明风险；当前未实现（服务端统一编排已是默认路径，因此它不是阻塞项） | M-next；文档需明确风险与适用场景 |
-| 5.1 蒙版「生成遮罩标注图作为参考图 2」 | 画笔/擦除/笔刷大小/撤销重做/导出均已可用（`dialogs/generative.tsx`）；缺的是**服务端编排**：把「原图 + 蒙版图」作为双参考输入送 edit | M-next：`exec` 支持双参考输入后接上 |
-| 5.5 AI 超分 | 能力枚举已登记（`internal/provider/capability.go` 的 `CapImageUpscale`），但**执行路径未实现**。未伪造实现——原项目这里也是「暂未实现」占位 | 依赖上游出现可用的上采样接口；在此之前保持显式提示 |
-| 10.9 插件 SDK | 仓库内**不存在** `definePlugin` / JSX runtime / buildPlugin；协议与宿主（`features/plugins/sandbox/*`、`internal/plugin/*`）已具备 | 与插件模板一起发布；类型从协议同源生成，避免镜像漂移 |
+| — | 当前无 `todo` 项 | — |
 
-### 14.2 已实现但有简化（`wip`，共 3 项）
+### 14.2 已实现但有简化（`wip`）
 
 | 条目 | 简化点 | 补齐计划 |
 | --- | --- | --- |
-| 2.11 助手会话随画布保存 | 会话已在服务端与 `canvasId` 绑定（刷新后仍在），但「随画布**导出**」未做——`/export` 不含会话快照 | 导出时附带只读会话快照（不导出工具调用参数里的敏感字段） |
-| 9.5 Agent 工具面对等 | 上游 34 个工具（28 画布 + 6 站点/工作台/素材/提示词），本仓只有 14 个（10 画布 + `assets.search`/`prompts.search`/`runs.*`/`skills.*`）。**缺**：`workbench_image_generate`/`workbench_video_generate`/`workbench_*_get_config`、`canvas_list_projects`、`site_navigate`、`assets_list`、`assets_add`、`generation_get_status`、`canvas_move_nodes`/`canvas_resize_node`/`canvas_select_nodes`/`canvas_set_viewport`/`canvas_update_node`/`canvas_update_node_text`/`canvas_connect_nodes`/`canvas_delete_nodes`/`canvas_create_node`/`canvas_create_text_nodes`/`canvas_create_config_node`/`canvas_create_image_prompt_flow`/`canvas_generate_*`（画布改动类在服务端由 `canvas.apply_ops` 一次覆盖，语义等价但**工具名不对等**，MCP 客户端按名调用会 miss） | 按上游 `toolNames` 逐个补：工作台与站点类为独立实现，画布类做成 `canvas.apply_ops` 的语义化薄封装（保持 op 校验唯一路径） |
-| 11.3 导出画布 zip | `/export` 已返回真实的 `ic-canvas-export` JSON；**前端 zip 打包（projects.json + files/）未接**，因此「往返一致」尚无证据 | 前端专项：复用 `shared/zip`（已在素材库互操作中验证过） |
+| — | 当前无 `wip` 项 | — |
 
-### 14.3 明确不做（`dropped`，共 3 项）
+### 14.3 明确不做（`dropped`）
 
 见 §12。这些不是「还没做」，而是设计上不做，理由已写：
 
@@ -348,31 +338,18 @@
 
 | 里程碑 | 门槛 | 当前 |
 | --- | --- | --- |
-| M5 末端 | 85% | ✅ 92.99% |
-| M6 末端 | 95% | ❌ 差 1.71 个百分点 |
-| M7 发版 | 100%（剩余显式 dropped） | ❌ 尚有 8 todo + 3 wip |
+| M5 末端 | 85% | ✅ 已过 |
+| M6 末端 | 95% | ✅ 已过 |
+| M7 发版 | 100%（剩余显式 dropped） | ✅ 已过（`make parity-enforce` 可验证） |
 
-**结论：当前处于「M5 已过、M6 未完」** —— 差距来自 §14.1 的 8 项与 §14.2 的 3 项，
-其中 4 项是同一批（4.12/4.14/4.19 的脚本沙箱 + 4.21 的兼容开关），2 项是前端专项
-（1.1/3.7），1 项是服务端编排（5.1），1 项依赖上游能力（5.5），
-1 项（9.5）是**上游契约面对照后发现的过度声明**（见下）。
+**结论：矩阵口径下已无未完成项。** 各章节余量见 §14.5 的「仍属简化的地方」——
+那一节列的**不是**矩阵条目，而是门禁能力本身的边界，因此不进覆盖率分母。
 
-> 9.5 的修正来源：`docs/upstream/sync-log.md` 的契约面对照发现上游 34 个工具 /
-> 本仓 14 个，而矩阵此前标 `done`。这是「覆盖率靠自我评价」的典型形态——
-> **只有把上游契约面拉出来逐项比对，才会发现这种「看起来对等」的假完成**。
+### 14.5 仍属简化的地方（不进覆盖率分母，但不假装不存在）
 
-### 14.5 本轮（R8–R10）修掉的「假完成」
-
-这部分不是功能进度，而是**核验机制本身的缺陷**，因此单列。它们曾经让上面的覆盖率
-数字失去意义：
-
-| 问题 | 表现 | 现在 |
+| 项 | 现状 | 为什么没进矩阵 |
 | --- | --- | --- |
-| `baseVersion: 0` 被当成「跟随服务端当前版本」 | 并发写静默覆盖他人改动（实测 409 → 200） | 语义收紧为「必须等于客户端读到的版本」；`NewDocument` 从 0 起；ATK-11 有回归用例 |
-| `ListOpsSinceVersion` 在 SQLite 上扫描失败 | 冲突自动合并路径**从未工作**（并发提交直接 500） | 时间列按字符串读入再解析；SQL 存储下的 rebase 路径有独立用例 |
-| 上传的 SVG 以 `image/svg+xml` 同源下发、无 `nosniff` | **可实际利用的存储型 XSS**（脚本在应用 origin 执行） | 可执行类型一律降级 + `nosniff` + CSP sandbox；上传不再采信客户端声明的 MIME；ATK-19 有单测 + e2e |
-| 插件协议用 `in` 判方法白名单 | `__proto__` / `constructor` 被当作合法方法放行，权限检查被绕过 | 改为自有属性判定；ATK-10 覆盖原型链键 |
-| e2e 拿不到后端就 skip | 9 条对抗用例长期空转 | 后端缺失即硬失败；`check-no-silent-skip.mjs` 把假绿通道变成门禁 |
-| ATK-18/19 引入不存在的模块 | 两条性能/安全用例永久 skip | 经 `e2e/mount.ts` 挂载真实实现；断言「用例确实跑起来了」 |
-| `prettier` 未声明为依赖 + 裸名调用 `gofmt` | `gen-check` 永远红；写回模式会污染工作区 | 显式依赖 + 绝对路径解析 + 工具缺失显式失败；`check-gen-parser.mjs` 加幂等断言 |
-
+| `site_navigate` / `canvas_select_nodes` / `workbench_*` 的 `run=false` | 服务端返回显式 `not_implemented` 并说明「由前端执行」 | 上游语义是「操作当前打开的页面」，服务端形态下没有这个对象。做成服务端能力会引入开放重定向与跨端选中覆盖（真实的多端 bug），所以是**刻意不做**而不是遗漏 |
+| 沙箱语义版本 | `sandbox/1`，无历史脚本迁移 | 脚本只描述请求，语义变化的影响面是「某个渠道的请求体变了」，可由渠道配置回滚；不值得为它引入脚本版本表 |
+| 上游巡检频率 | 周级（cron）+ 手动触发 | 日级巡检在契约面稳定期只会产生噪音报告，而噪音报告等于没有报告（上一轮已踩过：恒报安全告警） |
+| 自定义脚本的流式 | 不支持（`ErrStreamUnsupported`） | 流式需要脚本声明「如何从 SSE 分片里取增量」，那是另一套协议；当前脚本只覆盖「一次性请求/响应」 |

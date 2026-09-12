@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"sort"
 
 	"github.com/context-flow/ic/internal/graph"
 )
@@ -176,8 +177,92 @@ func ToolSet() []ToolDef {
 	}
 }
 
-// ToolByName 查表。
+// ToolByName 查表：先查规范工具，再查上游工具名。
+//
+// 两条路径都返回同一个 ToolDef 形状，因此审批、审计、MCP 暴露三者
+// 不需要知道「这个名字来自哪一边」——差异化只存在于执行层（翻译）。
 func ToolByName(name string) (ToolDef, bool) {
+	for _, t := range ToolSet() {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	for _, t := range UpstreamToolSet() {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return ToolDef{}, false
+}
+
+// UpstreamToolSet 返回上游 34 个工具名对应的定义。
+//
+// 别名工具（语义与规范工具完全一致）的 schema 直接复用规范定义：
+// 复制一份会让「上游改了参数、规范没改」或反过来变成两处要同步。
+func UpstreamToolSet() []ToolDef {
+	out := make([]ToolDef, 0, len(UpstreamToolNames()))
+	// 别名工具先出（它们只有名字与转发目标，schema 与描述复用规范工具）。
+	aliasNames := make([]string, 0, len(upstreamAliases))
+	for name := range upstreamAliases {
+		aliasNames = append(aliasNames, name)
+	}
+	sort.Strings(aliasNames)
+	for _, name := range aliasNames {
+		canon := upstreamAliases[name]
+		c, found := canonicalTool(canon)
+		if !found {
+			// 别名指向不存在的规范工具是**配置错误**，不能静默跳过：
+			// 跳过会让「工具不见了」在运行时才暴露。
+			continue
+		}
+		out = append(out, c)
+		out[len(out)-1].Name = name
+	}
+	for _, d := range upstreamToolDefs() {
+		def := ToolDef{
+			Name:        d.name,
+			Description: d.description,
+			InputSchema: d.schema,
+			Scope:       d.scope,
+			Approval:    d.approval,
+			CostsMoney:  d.costs,
+		}
+		if def.Approval == "" {
+			// 未显式声明时按 scope 推导：只读一律自动放行。
+			// 让「漏写 Approval」变成「需要确认」会让每个只读工具都要点一次，
+			// 用户会习惯性放行 —— 审批就失去意义了。
+			def.Approval = approvalForScope(def.Scope, def.CostsMoney)
+		}
+		if canon, ok := upstreamAliases[d.name]; ok {
+			if c, found := canonicalTool(canon); found {
+				// 描述保留规范版本的（它写了本仓的约束，例如
+				// 「服务端解析归属」「不返回字节」），
+				// 但对齐 scope/approval：权限判定必须由能力决定，不由名字决定。
+				def.Description = c.Description
+				def.InputSchema = c.InputSchema
+				def.Scope = c.Scope
+				def.Approval = c.Approval
+				def.CostsMoney = c.CostsMoney
+			}
+		}
+		out = append(out, def)
+	}
+	return out
+}
+
+// approvalForScope 按 scope 推导默认审批策略。
+func approvalForScope(scope string, costs bool) ApprovalMode {
+	if costs {
+		return ApprovalConfirm
+	}
+	if scope == "read" {
+		return ApprovalAuto
+	}
+	return ApprovalConfirm
+}
+
+// canonicalTool 只在规范表里查找（不做二次回退，避免递归）。
+func canonicalTool(name string) (ToolDef, bool) {
 	for _, t := range ToolSet() {
 		if t.Name == name {
 			return t, true

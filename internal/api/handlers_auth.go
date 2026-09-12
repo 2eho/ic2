@@ -199,10 +199,6 @@ func (h *handlers) principal(r *http.Request) (*Principal, error) {
 func (h *handlers) requireWorkspace(r *http.Request, wsID string) (*Principal, error) {
 	p, err := h.principal(r)
 	if err != nil {
-		if de, ok := err.(*platform.DomainError); ok && de == nil {
-			h.logf(r, "DBG requireWorkspace: typed nil DomainError from principal")
-			return nil, platform.NewError(http.StatusUnauthorized, platform.CodeUnauthorized, "unauthenticated")
-		}
 		return nil, err
 	}
 	if p == nil {

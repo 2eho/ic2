@@ -78,6 +78,24 @@ type RunLister interface {
 	GetRunBrief(ctx context.Context, wsID, runID string) (map[string]any, error)
 }
 
+// ProjectLister 列出工作区内的画布（canvas_list_projects 用）。
+//
+// 单独一个接口而不是扩展 CanvasGateway：网关的语义是「对**指定画布**的读写」，
+// 而列画布恰好是「还不知道要操作哪个画布」——两者权限模型也不同
+// （前者按画布授权，后者按工作区授权）。
+type ProjectLister interface {
+	ListProjectsBrief(ctx context.Context, keyword string, page, pageSize int) ([]map[string]any, error)
+}
+
+// AdHocRunner 提交一次直通生成（工作台工具用，不落画布）。
+//
+// 与 RunTrigger 分开：RunTrigger 编译的是**画布 DAG**（需要节点 ID），
+// 而工作台的输入是一组参数。合并成一个接口会让实现方被迫在
+// 一个方法里分支两种完全不同的入参形状。
+type AdHocRunner interface {
+	SubmitAdHoc(ctx context.Context, canvasID, actor string, params map[string]any) (string, error)
+}
+
 // SkillStore 读写 Agent Skills（9.14）。
 type SkillStore interface {
 	ListSkills(ctx context.Context, wsID string) ([]map[string]any, error)
@@ -104,6 +122,10 @@ type Service struct {
 	skills  SkillStore
 	// downloads 把 URL 落成资产（附件转节点用）。
 	files AttachmentFetcher
+	// projects 与 adhoc 是上游工具面（9.5）引入的能力：
+	// canvas_list_projects 需要列画布，workbench_* 需要直通生成。
+	projects ProjectLister
+	adhoc    AdHocRunner
 }
 
 // AttachmentFetcher 把外部资源/内联数据落成工作区资产（9.7）。
@@ -114,17 +136,20 @@ type AttachmentFetcher interface {
 // Wire 注入可选能力。集中成一个方法而不是若干 SetXxx：
 // 装配方一眼能看到「agent 依赖哪些外部能力」，漏注入会在测试里直接暴露。
 type Wire struct {
-	Runs    RunTrigger
-	Assets  AssetLister
-	Prompts PromptSearcher
-	RunList RunLister
-	Skills  SkillStore
-	Files   AttachmentFetcher
+	Runs     RunTrigger
+	Assets   AssetLister
+	Prompts  PromptSearcher
+	RunList  RunLister
+	Skills   SkillStore
+	Files    AttachmentFetcher
+	Projects ProjectLister
+	AdHoc    AdHocRunner
 }
 
 // SetCapabilities 注入外部能力。
 func (s *Service) SetCapabilities(w Wire) {
 	s.runs, s.assets, s.prompts, s.runList, s.skills, s.files = w.Runs, w.Assets, w.Prompts, w.RunList, w.Skills, w.Files
+	s.projects, s.adhoc = w.Projects, w.AdHoc
 }
 
 // Options 构造参数。
@@ -179,6 +204,69 @@ func (s *Service) CreateSession(ctx context.Context, wsID, canvasID string, back
 		return nil, platform.AsError(err)
 	}
 	return sess, nil
+}
+
+// SessionsForCanvas 返回某画布下的会话快照（2.11：随画布导出）。
+//
+// 只回**只读快照**而不是完整会话：
+//   - 工具调用参数里可能带着凭据、URL、内网地址（Agent 会把它们写进 arguments），
+//     导出文件经常被贴进聊天群或存网盘，泄露代价很高；
+//   - 导出物是给人看的「当时聊了什么」，不是可恢复的运行上下文。
+//
+// 因此这里对 payload 做**字段级裁剪**：保留 agent_message / reasoning 的文本，
+// 其余条目只保留类型与时间。裁剪而不是丢弃，让「导出里少了一段」这件事
+// 是可见的（用户能看出发生过工具调用）。
+func (s *Service) SessionsForCanvas(ctx context.Context, canvasID string, limit int) ([]SessionSnapshot, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, canvas_id, COALESCE(thread_id,''), title, created_at
+		 FROM agent_sessions WHERE canvas_id = ? ORDER BY created_at DESC LIMIT ?`, canvasID, limit)
+	if err != nil {
+		return nil, platform.AsError(err)
+	}
+	defer rows.Close()
+	out := []SessionSnapshot{}
+	for rows.Next() {
+		var snap SessionSnapshot
+		var created string
+		if err := rows.Scan(&snap.ID, &snap.CanvasID, &snap.ThreadID, &snap.Title, &created); err != nil {
+			return nil, platform.AsError(err)
+		}
+		snap.CreatedAt = parseTime(created)
+		turns, err := s.turns(ctx, snap.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range turns {
+			snap.Turns = append(snap.Turns, TurnSnapshot{Seq: t.Seq, Status: string(t.Status), Input: t.Input, Items: redactItems(t.Items)})
+		}
+		out = append(out, snap)
+	}
+	return out, rows.Err()
+}
+
+// redactItems 裁剪条目内容：只保留可读文本，其余降级为类型标记。
+func redactItems(items []Item) []ItemSnapshot {
+	out := make([]ItemSnapshot, 0, len(items))
+	for _, it := range items {
+		snap := ItemSnapshot{Kind: string(it.Kind), At: it.CreatedAt}
+		if it.Kind == ItemAgentMessage || it.Kind == ItemReasoning {
+			var payload struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(it.Payload, &payload) == nil {
+				snap.Text = payload.Text
+			}
+		} else {
+			// 非文本条目（tool_call/result/file_change/error）不带 payload：
+			// 它们的 payload 里正是最可能含凭据与内网地址的部分。
+			snap.Redacted = true
+		}
+		out = append(out, snap)
+	}
+	return out
 }
 
 // GetSession 读取会话与全部轮次。
@@ -363,6 +451,12 @@ func (s *Service) ExecuteTool(ctx context.Context, canvasID, actor string, call 
 			Error: &ToolError{Code: "unknown_tool", Message: call.Name}}, nil
 	}
 	_ = def
+	// 上游工具名（9.5）：先尝试上游分发，命中即返回。
+	// 放在规范工具之前，是因为两边没有重名（别名工具用的是上游名），
+	// 所以顺序不影响正确性，但让「新增上游工具只需改一处」成立。
+	if res, handled := s.executeUpstream(ctx, canvasID, actor, call); handled {
+		return res, nil
+	}
 	switch call.Name {
 	case "canvas.get_state", "canvas.get_selection", "canvas.export_snapshot":
 		snap, err := s.Snapshot(ctx, canvasID)

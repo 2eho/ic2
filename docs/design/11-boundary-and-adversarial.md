@@ -25,6 +25,8 @@
 | INV-8 | 任一写操作的 `actor_id` 可追溯，且不等于「无法归属」 |
 | INV-9 | 金额/成本用整数微元表示，聚合后与逐项求和不产生浮点误差 |
 | INV-10 | 删除工作区/项目后，其他工作区不可再读到其任何数据（含通过 ID 猜测） |
+| INV-11 | 用户提供的自定义脚本**永不**获得宿主能力：无动态求值、无循环、无原型链、无宿主全局；其产出的请求只能落在渠道 `baseUrl` 之下，且不能设置由平台管理的头部 |
+| INV-12 | 直连降级通道**默认关闭**，开启必须显式确认风险且地址为回环；生效范围由用户逐项勾选，不由服务端默认扩大 |
 
 ## 2. 边界推演（Boundary）
 
@@ -193,6 +195,10 @@
 | ATK-20 | 1MB 提示词 | 422，且**不创建 Run、不产生上游调用** | `internal/api/adversary_test.go` |
 | ATK-21 | 画布 op 日志重放与快照比对 | 完全一致（INV-1） | `internal/graph/replay_test.go` |
 | ATK-22 | 删除工作区后用旧 ID 访问 | 立即 404；7 天冷静期后可恢复；到期进入清理候选 | `internal/identity/delete_test.go` |
+| ATK-23 | 自定义调用脚本里写 `eval` / `Function` / `__proto__` / 拼接出的 `constructor` / 循环 / `require` | 一律拒绝，且以 4xx（不是 500）返回——脚本写错是用户输入问题 | `internal/sandbox/sandbox_test.go`, `web/e2e/sandbox-script.spec.ts` |
+| ATK-24 | 脚本里设 `Authorization` 头；脚本请求 `169.254.169.254` 或任意第三方主机 | 拒绝：凭据只由平台注入，请求只能落在渠道 `baseUrl` 之下 | `internal/provider/adapter/script/script_test.go`, `web/e2e/sandbox-script.spec.ts` |
+| ATK-25 | 通过节点 `meta` 写入 `__proto__` 等原型链键；或写入超过上限的键数 | 拒绝（meta 会在前端 `JSON.parse` 后变成真实对象，跨边界生效） | `internal/graph/op_test.go`, `internal/agent/translate_test.go` |
+| ATK-26 | 本地直连开关：只开开关不确认风险 / 填非回环地址 / 填未知能力名 | 一律拒绝（服务端校验，绕过 UI 也无效） | `internal/workspace/direct_test.go`, `web/e2e/sandbox-script.spec.ts` |
 
 > 红队不是一次性的：每引入一个新的外部依赖/新协议/新存储，**必须补一条对抗用例**。
 > PR 模板中有「本次改动新增了哪些边界？补了哪条对抗用例？」必填项。

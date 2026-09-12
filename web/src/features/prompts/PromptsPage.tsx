@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/shared/api";
 import { useWorkspace } from "@/shared/session/workspace";
+import { ImageLightbox } from "@/shared/components/ImageLightbox";
 import type { TFn } from "@/app/App";
 
 /** 提示词库：服务端检索 + 复制（不再浏览器直连 7 个仓库，见 DIV-01）。 */
@@ -10,6 +11,7 @@ export function PromptsPage({ t }: { t: TFn }) {
   const [q, setQ] = useState("");
   const [tags, setTags] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
 
   const list = useQuery({
     queryKey: ["prompts", workspaceId, q, tags],
@@ -71,6 +73,29 @@ export function PromptsPage({ t }: { t: TFn }) {
       >
         {(list.data?.items ?? []).map((p) => (
           <div key={p.id} className="ic-card" style={{ padding: 12 }}>
+            {p.coverUrl && (
+              <img
+                src={p.coverUrl}
+                alt={p.title}
+                role="button"
+                tabIndex={0}
+                title={t("prompts.preview")}
+                onClick={() => setPreview(p.coverUrl ?? null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    setPreview(p.coverUrl ?? null);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  height: 120,
+                  objectFit: "cover",
+                  borderRadius: 6,
+                  marginBottom: 8,
+                  cursor: "zoom-in",
+                }}
+              />
+            )}
             <strong style={{ fontSize: 13 }}>{p.title}</strong>
             <p className="ic-dim" style={{ fontSize: 12, minHeight: 48 }}>
               {p.content.slice(0, 90)}
@@ -103,6 +128,7 @@ export function PromptsPage({ t }: { t: TFn }) {
           </div>
         ))}
       </div>
+      {preview && <ImageLightbox src={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }

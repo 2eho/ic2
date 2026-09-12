@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strconv"
 	"strings"
 
 	"github.com/context-flow/ic/internal/platform"
@@ -29,7 +30,7 @@ func (a *Adapter) ID() string { return "openai" }
 // Capabilities 见 provider.Adapter。
 func (a *Adapter) Capabilities() []provider.Capability {
 	return []provider.Capability{
-		provider.CapImageGenerate, provider.CapImageEdit,
+		provider.CapImageGenerate, provider.CapImageEdit, provider.CapImageUpscale,
 		provider.CapTextGenerate, provider.CapTextTools,
 		provider.CapVideoGenerate, provider.CapAudioGenerate,
 		provider.CapModelList,
@@ -43,6 +44,8 @@ func (a *Adapter) Invoke(ctx context.Context, cred provider.Credential, req prov
 		return a.imageGenerate(ctx, cred, req)
 	case provider.CapImageEdit:
 		return a.imageEdit(ctx, cred, req)
+	case provider.CapImageUpscale:
+		return a.imageUpscale(ctx, cred, req)
 	case provider.CapTextGenerate:
 		return a.textGenerate(ctx, cred, req)
 	case provider.CapVideoGenerate:
@@ -104,12 +107,23 @@ func (a *Adapter) imageGenerate(ctx context.Context, cred provider.Credential, r
 }
 
 func (a *Adapter) imageEdit(ctx context.Context, cred provider.Credential, req provider.Request) (provider.Response, error) {
+	return a.imageEditWith(ctx, cred, req, req.Model, ComposePrompt(req))
+}
+
+// imageEditWith 是 edits 端点的共用实现。
+//
+// 抽出来的原因：image.edit 与 image.upscale 走的是同一个端点、同一份 multipart
+// 形状，只有模型名与提示词不同。写两份会让「参考图字段名」这类细节在下一次修改时
+// 只改一处——而这类不一致的症状是「某一条路径开始被上游拒绝」。
+// **参考图按顺序全部上传**：图生图与蒙版双参考（5.1）都依赖这一点，
+// 顺序即语义（图片1 = 原图，图片2 = 蒙版）。
+func (a *Adapter) imageEditWith(ctx context.Context, cred provider.Credential, req provider.Request, model, prompt string) (provider.Response, error) {
 	// /v1/images/edits 是 multipart。原项目曾因重复的 `image` 字段被中转站拒绝，
 	// 这里统一使用 `image[]` 数组字段（见 docs/design/10 §4.3）。
 	var buf strings.Builder
 	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("model", req.Model)
-	_ = mw.WriteField("prompt", ComposePrompt(req))
+	_ = mw.WriteField("model", model)
+	_ = mw.WriteField("prompt", prompt)
 	_ = mw.WriteField("n", fmt.Sprint(max1(req.Count)))
 	_ = mw.WriteField("size", strParam(req.Params, "size", "1024x1024"))
 	_ = mw.WriteField("response_format", "b64_json")
@@ -128,7 +142,10 @@ func (a *Adapter) imageEdit(ctx context.Context, cred provider.Credential, req p
 			if idx < 0 {
 				continue
 			}
-			if err := writeDataURIPart(mw, "image[]", "ref.png", in.AssetID[:idx], in.AssetID[idx+1:]); err != nil {
+			// 文件名带上序号：上游按 multipart 顺序解析时，序号是唯一能让
+			// 「日志里的请求」和「用户看到的『图片2』」对上的线索。
+			name := fmt.Sprintf("ref%d.png", images+1)
+			if err := writeDataURIPart(mw, "image[]", name, in.AssetID[:idx], in.AssetID[idx+1:]); err != nil {
 				return provider.Response{}, platform.AsError(err)
 			}
 			images++
@@ -152,6 +169,47 @@ func (a *Adapter) imageEdit(ctx context.Context, cred provider.Credential, req p
 		return provider.Response{}, err
 	}
 	return imageResponse(out, req), nil
+}
+
+// imageUpscale 走「图像编辑」端点做上采样（5.5）。
+//
+// 为什么不做成独立的 capability 实现：上游并没有一个统一的
+// `/v1/images/upscale` 端点，各家命名与参数都不同（有的叫 upscale、有的叫
+// super-resolve、有的是在 edits 里传 scale）。这里采用**能力枚举已登记 +
+// 走 edits 端点 + 用模型名区分**的收敛方案：
+//
+//   - 模型名里含 upscale/superres 时，上游自己就是一个超分模型，
+//     请求体与 image.edit 完全一致（只是模型不同）；
+//   - 否则用 prompt 显式说明「上采样到 N 倍」，让通用编辑模型做重绘式放大。
+//
+// 这样做的代价是「效果取决于模型」，收益是**不会伪造一个不存在的端点**：
+// 上一版 parity 矩阵里这一项标 todo 的原因正是「原项目也是占位」。
+// 现在的差别是：这里真的会发出请求并产生结果，而不是返回一句「暂未支持」。
+func (a *Adapter) imageUpscale(ctx context.Context, cred provider.Credential, req provider.Request) (provider.Response, error) {
+	if len(req.Inputs) == 0 {
+		return provider.Response{}, &provider.ProviderError{
+			Class: provider.ClassPermanent, Code: platform.CodeInvalidRequest,
+			Message: "image.upscale requires a source image",
+		}
+	}
+	scale := numParam(req.Params, "scale", 2)
+	edge := numParam(req.Params, "targetEdge", 0)
+	prompt := ComposePrompt(req)
+	if prompt == "" {
+		prompt = fmt.Sprintf("Upscale this image %gx with maximum detail preservation; "+
+			"do not change composition, colors or content.", scale)
+	}
+	// 超分模型：请求体与编辑一致，只换模型
+	if strings.Contains(strings.ToLower(req.Model), "upscale") ||
+		strings.Contains(strings.ToLower(req.Model), "superres") {
+		return a.imageEditWith(ctx, cred, req, req.Model, prompt)
+	}
+	if edge > 0 {
+		// 目标边长写进提示词：这是唯一能在通用编辑模型上表达「输出尺寸」的通道。
+		// 不静默丢掉它——丢掉了用户设置的尺寸，症状是「参数改了没反应」。
+		prompt = fmt.Sprintf("%s\nTarget longest edge: %g px.", prompt, edge)
+	}
+	return a.imageEditWith(ctx, cred, req, req.Model, prompt)
 }
 
 func imageResponse(out imageResp, req provider.Request) provider.Response {
@@ -402,6 +460,37 @@ func GuessCapabilities(model string) []provider.Capability {
 		add(provider.CapTextGenerate)
 	}
 	return caps
+}
+
+// numParam 读数字参数（兼容 float64 / int / 数字字符串）。
+// 只接受能解析成有限数的值，其余返回默认值——参数面板里用户清空输入框时
+// 会传空串，此时「用默认值」比「报错」更符合预期。
+func numParam(params map[string]any, key string, def float64) float64 {
+	if params == nil {
+		return def
+	}
+	v, ok := params[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		if n != n { // NaN
+			return def
+		}
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err != nil {
+			return def
+		}
+		return f
+	}
+	return def
 }
 
 // max1 保证张数至少为 1。

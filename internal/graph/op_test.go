@@ -618,3 +618,88 @@ func itoaRaw(n int) string {
 	}
 	return string(b[i:])
 }
+
+// ---------------------------------------------------------------- meta 通道
+//
+// meta 是「明确不参与执行」的扩展位（02-domain-model）。它不做字段白名单
+//（那会限制用途），但必须做原型链与规模检查 —— 因为 meta 会被序列化、
+// 传到前端、由 JSON.parse 变成真实对象，那时才是污染生效的时刻。
+
+func TestApplySetMetaWritesUnderMetaNotSpec(t *testing.T) {
+	doc := NewDocument("cv_1", "p_1")
+	doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt, Spec: NodeSpec{"text": "t"}}
+
+	inverse, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", Meta: map[string]any{"k": "v"}})
+	if err != nil {
+		t.Fatalf("只改 meta 应当成功: %v", err)
+	}
+	if doc.Nodes["n1"].Meta["k"] != "v" {
+		t.Fatalf("meta 未写入: %#v", doc.Nodes["n1"].Meta)
+	}
+	if _, leaked := doc.Nodes["n1"].Spec["k"]; leaked {
+		t.Fatal("meta 内容不该进 spec")
+	}
+	if len(inverse) == 0 {
+		t.Fatal("必须返回 inverse（否则这个修改无法撤销）")
+	}
+}
+
+// ATK-25：meta 里的原型链键必须在服务端就被拒绝。
+func TestApplySetMetaRejectsProtoKeys(t *testing.T) {
+	for _, key := range []string{"__proto__", "constructor", "prototype"} {
+		doc := NewDocument("cv_1", "p_1")
+		doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt}
+		_, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", Meta: map[string]any{key: 1}})
+		if err == nil {
+			t.Fatalf("meta 键 %s 应当被拒绝（它会在前端 JSON.parse 后变成真实污染）", key)
+		}
+	}
+}
+
+func TestApplySetMetaRejectsNullValue(t *testing.T) {
+	doc := NewDocument("cv_1", "p_1")
+	doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt}
+	_, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", Meta: map[string]any{"k": nil}})
+	if err == nil {
+		t.Fatal("null 值应当被拒绝：显式删除走 metaUnset（与 spec 的 unset 同一条纪律）")
+	}
+}
+
+func TestApplySetMetaEmptyObjectDoesNotClear(t *testing.T) {
+	// 传空对象**不表示清空**：隐式清空是「一次误传就毁掉配置」的典型形态。
+	doc := NewDocument("cv_1", "p_1")
+	doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt, Meta: map[string]any{"keep": 1}}
+	_, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", Meta: map[string]any{}})
+	if err == nil {
+		t.Fatal("空 meta 且无其它改动应当被拒绝（没有可执行的动作）")
+	}
+	if doc.Nodes["n1"].Meta["keep"] != 1 {
+		t.Fatal("被拒绝的调用不应改动 meta")
+	}
+}
+
+func TestApplySetMetaUnsetRemovesKey(t *testing.T) {
+	doc := NewDocument("cv_1", "p_1")
+	doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt, Meta: map[string]any{"a": 1, "b": 2}}
+	if _, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", MetaUnset: []string{"a"}}); err != nil {
+		t.Fatalf("显式删除应当成功: %v", err)
+	}
+	if _, ok := doc.Nodes["n1"].Meta["a"]; ok {
+		t.Fatal("a 未被删除")
+	}
+	if doc.Nodes["n1"].Meta["b"] != 2 {
+		t.Fatal("b 不该被影响")
+	}
+}
+
+func TestApplySetMetaKeyLimit(t *testing.T) {
+	doc := NewDocument("cv_1", "p_1")
+	doc.Nodes["n1"] = Node{ID: "n1", Type: NodeTypePrompt}
+	meta := map[string]any{}
+	for i := 0; i < MaxMetaKeys+5; i++ {
+		meta["k"+itoa(i)] = i
+	}
+	if _, err := applySetSpec(doc, &SetSpecPayload{ID: "n1", Meta: meta}); err == nil {
+		t.Fatal("超过键数上限应当被拒绝（无上限的 meta 会变成隐形数据库）")
+	}
+}

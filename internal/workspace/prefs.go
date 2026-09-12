@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -58,7 +59,57 @@ type Prefs struct {
 	DefaultModels *ModelDefaults   `json:"defaultModels,omitempty"`
 	Generation    *GenerationPrefs `json:"generation,omitempty"`
 	Sync          *SyncPrefs       `json:"sync,omitempty"`
+	Direct        *DirectPrefs     `json:"direct,omitempty"`
 	UI            map[string]any   `json:"ui,omitempty"`
+}
+
+// DirectPrefs 是「本地直连模式」开关（4.21）。
+//
+// 这个开关是**兼容项**，不是默认路径：重写后的正常形态是「服务端统一编排」
+// （凭据在服务端、执行在服务端、计量在服务端）。但存在一类真实场景：
+// 用户在内网、上游模型只能从本机访问，或用户坚持「密钥绝不离开本机」。
+// 此时应用需要一个明确的降级通道。
+//
+// 三条设计约束，缺一不可：
+//
+//  1. **默认关闭**：默认值必须是 false。默认开启意味着任何一次升级都会让
+//     所有用户的请求路径变化，而他们没做任何选择。
+//  2. **必须显式确认风险**：`AcknowledgedAt` 有值才认为用户知情。
+//     只存一个 bool 会让「误触开关」变成「静默降级」。
+//  3. **有生效范围**：`Scope` 限定哪些能力走直连（默认只有 image.generate）。
+//     全部走直连等于把服务端编排、计量、限额一起绕过——那不是一个开关该有的权力。
+type DirectPrefs struct {
+	// Enabled 是否启用本地直连。
+	Enabled bool `json:"enabled"`
+	// BaseURL 是本机代理地址（必须回环，服务端会校验）。
+	BaseURL string `json:"baseUrl,omitempty"`
+	// Scope 是走直连的能力列表，空表示默认集合。
+	Scope []string `json:"scope,omitempty"`
+	// AcknowledgedAt 是用户确认风险的时间；为空时 Enabled 不生效。
+	AcknowledgedAt string `json:"acknowledgedAt,omitempty"`
+}
+
+// DirectDefaultScope 是直连默认生效的能力。
+//
+// 只含 image.generate：它是最常见的内网模型、且失败代价最低（重试即可）。
+// 把 video.generate 放进默认集合会让「昂贵的任务静默走到未计量的路径」。
+func DirectDefaultScope() []string { return []string{"image.generate"} }
+
+// DirectEnabled 判定直连是否**真正生效**（开关 + 风险确认）。
+//
+// 两个条件分开存、在这里合起来判定，而不是在写入时就丢掉其中一半：
+// 「用户开了开关但没确认」与「用户没开开关」是两种不同状态，
+// UI 需要能区分它们（前者要提示「还差一步」，后者是默认状态）。
+func (p Prefs) DirectEnabled() bool {
+	return p.Direct != nil && p.Direct.Enabled && p.Direct.AcknowledgedAt != ""
+}
+
+// DirectScope 返回实际生效的能力集合（空值走默认）。
+func (p Prefs) DirectScope() []string {
+	if p.Direct == nil || len(p.Direct.Scope) == 0 {
+		return DirectDefaultScope()
+	}
+	return p.Direct.Scope
 }
 
 // ModelDefaults 是四类默认模型。
@@ -164,6 +215,13 @@ func (s *Service) Update(ctx context.Context, wsID string, patch Prefs) (Prefs, 
 		return Prefs{}, platform.NewError(422, platform.CodeInvalidRequest, "偏好文档过大").
 			WithDetail("limitBytes", MaxPrefsBytes).WithDetail("actualBytes", len(raw))
 	}
+	var validated Prefs
+	if err := json.Unmarshal(raw, &validated); err != nil {
+		return Prefs{}, platform.AsError(err)
+	}
+	if err := validateDirect(validated.Direct); err != nil {
+		return Prefs{}, err
+	}
 	snap.Prefs = raw
 	if err := s.save(ctx, wsID, snap); err != nil {
 		return Prefs{}, err
@@ -173,6 +231,68 @@ func (s *Service) Update(ctx context.Context, wsID string, patch Prefs) (Prefs, 
 		return Prefs{}, platform.AsError(err)
 	}
 	return out, nil
+}
+
+// validateDirect 校验本地直连配置（4.21）。
+//
+// 校验发生在**写入时**而不是读取时：一份非法配置存进去了，之后每次读取都要
+// 处理它，而用户看到的是「设置页面报错」——他并不知道是哪一次写入造成的。
+//
+// 只允许回环地址的理由：这个开关叫「本地直连」，它的语义是「从用户的机器出去」。
+// 允许任意地址会让它变成「服务端代任意地址发请求」，也就是一个 SSRF 入口，
+// 而它看起来只是一个用户可编辑的字符串字段。
+func validateDirect(d *DirectPrefs) error {
+	if d == nil {
+		return nil
+	}
+	if !d.Enabled {
+		return nil
+	}
+	// 开启即要求确认：把这条约束放在服务端而不是只放在 UI，
+	// 否则直接调 API 就能绕过确认。
+	if d.AcknowledgedAt == "" {
+		return platform.NewError(422, platform.CodeInvalidRequest,
+			"开启本地直连必须确认风险（acknowledgedAt）")
+	}
+	base := strings.TrimSpace(d.BaseURL)
+	if base == "" {
+		return platform.NewError(422, platform.CodeInvalidRequest,
+			"本地直连必须填写本机代理地址").WithDetail("field", "baseUrl")
+	}
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return platform.NewError(422, platform.CodeInvalidRequest,
+			"本地直连地址必须是 http(s) URL").WithDetail("field", "baseUrl")
+	}
+	host := u.Hostname()
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return platform.NewError(422, platform.CodeInvalidRequest,
+			"本地直连地址必须是回环地址（127.0.0.1 / localhost / ::1）").
+			WithDetail("host", host)
+	}
+	for _, c := range d.Scope {
+		if !providerCapabilityKnown(c) {
+			return platform.NewError(422, platform.CodeInvalidRequest,
+				"本地直连的能力名未知").WithDetail("capability", c)
+		}
+	}
+	if _, err := time.Parse(time.RFC3339, d.AcknowledgedAt); err != nil {
+		return platform.NewError(422, platform.CodeInvalidRequest,
+			"acknowledgedAt 必须是 RFC3339 时间").WithDetail("value", d.AcknowledgedAt)
+	}
+	return nil
+}
+
+// providerCapabilityKnown 校验能力名。刻意在 workspace 包里重写一个小表，
+// 而不是 import provider：偏好是「配置」，不该为了一个字符串白名单依赖执行领域
+// （依赖会让 workspace 的测试被迫拉起 provider 的初始化）。
+func providerCapabilityKnown(c string) bool {
+	switch c {
+	case "image.generate", "image.edit", "image.upscale",
+		"text.generate", "text.tools", "video.generate", "audio.generate":
+		return true
+	}
+	return false
 }
 
 // PutSecrets 写入秘密段（加密）。空值表示**删除**该条，而不是存空串。

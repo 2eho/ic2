@@ -181,6 +181,16 @@ export interface CredentialInput {
   name: string;
   secret: string;
   priority?: number;
+  /**
+   * 凭据级附加配置（服务端存 provider_credentials.limits，明文 JSON）。
+   *
+   * 目前用于承载「自定义调用脚本」（4.12/4.14）。放在这里而不是单独的接口，
+   * 是因为脚本的生命周期与凭据完全一致：换一份凭据往往也换一份协议映射。
+   *
+   * 注意：这个字段**不是给密钥用的**——secret 走独立的加密列，
+   * 把密钥写进 limits 会绕过 at-rest 加密（check-secrets 会检出）。
+   */
+  limits?: Record<string, unknown>;
 }
 
 export interface ProbeResult {

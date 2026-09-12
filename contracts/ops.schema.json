@@ -42,6 +42,13 @@
     },
     "title": { "type": "string", "maxLength": 200 },
     "spec": { "type": "object", "description": "节点配置，按节点类型 schema 校验" },
+    "meta": { "type": "object", "description": "节点扩展元数据（不参与执行；键名不得为原型链相关键）" },
+    "metaUnset": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 128 },
+      "maxItems": 64,
+      "description": "显式删除 meta 键（传空对象不表示清空）"
+    },
     "state": { "type": "object", "description": "节点运行状态（status/result/error）" },
     "edge": {
       "type": "object",

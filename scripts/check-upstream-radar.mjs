@@ -184,6 +184,65 @@ try {
     if (report.verdict !== 'baseline') {
       problems.push(`无基线时 verdict=${report.verdict}，期望 baseline（否则会把首跑误报成变更）`);
     }
+    // 报告必须带**改写队列**：只说「上游变了什么」而没给落点与验收，
+    // 结局就是没人跟进（上一轮 docs/upstream/ 长期为空正是这个原因）。
+    if (!Array.isArray(report.rewriteQueue)) {
+      problems.push('报告缺少 rewriteQueue 字段：契约面变化必须翻译成「落点 + 动作 + 验收」');
+    }
+    if (typeof report.summary !== 'string' || !report.summary) {
+      problems.push('报告缺少 summary 字段：CI 日志与 Issue 标题需要它');
+    }
+
+    // 造一次**真的契约面变化**，验证队列里每条都带落点/动作/验收。
+    // 只测 baseline 与 noise 是不够的：这两条路径的 queue 都是空的，
+    // 队列逻辑坏了也测不出来（上一轮「产物存在但内容是空壳」正是这类问题）。
+    mkdirSync(join(fixture, 'canvas-agent/src/canvas'), { recursive: true });
+    writeFileSync(
+      join(fixture, 'canvas-agent/src/canvas/schemas.ts'),
+      [
+        'export const toolNames = [',
+        '    "canvas_get_state",',
+        '    "brand_new_tool",',
+        '] as const;',
+      ].join('\n'),
+    );
+    const r3 = spawnSync('node', ['scripts/report-upstream.mjs'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        VERSION: 'v0.0.1-fixture',
+        COMMIT: 'fixture2',
+        PREV_VERSION: 'v0.0.0-fixture',
+        PREV_COMMIT: 'fixture',
+        REPORT_PATH: join(fixture, 'report3.json'),
+        CLONE_DIR: fixture,
+      },
+    });
+    if (r3.status !== 0) {
+      problems.push(`契约面变化时 report-upstream.mjs 失败: ${r3.stderr?.slice(0, 200)}`);
+    } else {
+      const report3 = JSON.parse(readFileSync(join(fixture, 'report3.json'), 'utf8'));
+      if (report3.verdict === 'noise') {
+        problems.push('上游工具清单新增了一项，但判定为 noise（diff 逻辑漏了 tools）');
+      }
+      const q = report3.rewriteQueue ?? [];
+      if (q.length === 0) {
+        problems.push('检出契约面变化但 rewriteQueue 为空：变化会被静默丢弃');
+      }
+      const toolEntry = q.find((x) => x.probe === 'toolsAdded');
+      if (!toolEntry) {
+        problems.push(`rewriteQueue 缺少 toolsAdded 条目（实得 ${q.map((x) => x.probe).join(',')}）`);
+      } else {
+        for (const field of ['where', 'action', 'verify']) {
+          if (!toolEntry[field] || /需人工判断落点/.test(toolEntry[field])) {
+            problems.push(`toolsAdded 队列条目的 ${field} 未登记落点/动作/验收`);
+          }
+        }
+        if (!toolEntry.items.includes('brand_new_tool')) {
+          problems.push('队列条目未列出具体变化项（items 为空或内容不对）');
+        }
+      }
+    }
   }
 
   // 第二次运行（有基线、上游未变）必须判定为 noise：否则每次巡检都会产生假告警。
@@ -221,6 +280,49 @@ try {
   }
 } finally {
   rmSync(fixture, { recursive: true, force: true });
+}
+
+// ------------------------------------------------------------- 4) 本仓的上游工具清单必须与上游真源一致
+//
+// 这是 9.5 的**防复发**措施。上一轮的缺陷是：矩阵标 done、实际缺 20 个工具名，
+// 而没有任何门禁能发现——因为「清单是否正确」只存在于人的脑子里。
+//
+// 判据只能是上游的真源文件（`canvas-agent/src/canvas/schemas.ts` 的 toolNames）。
+// 有网络时对真上游校验；没有网络时退化为「与仓库内已归档的清单比对」，
+// 并**显式标注为降级**而不是静默通过。
+const upstreamRepo = process.env.UPSTREAM_DIR || 'upstream/infinite-canvas';
+const schemasPath = join(upstreamRepo, 'canvas-agent/src/canvas/schemas.ts');
+if (existsSync(schemasPath)) {
+  const text = readFileSync(schemasPath, 'utf8');
+  const block = text.split('export const toolNames')[1]?.split(']')[0] ?? '';
+  const upstreamNames = [...block.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const ourFile = 'internal/agent/tools_upstream.go';
+  const our = readFileSync(ourFile, 'utf8');
+  const ourBlock = our.split('func UpstreamToolNames() []string {')[1]?.split('}', 1)[0] ?? '';
+  const ourNames = [...ourBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  if (upstreamNames.length === 0) {
+    problems.push(`无法从 ${schemasPath} 解析出 toolNames（上游结构变了？探针需要更新）`);
+  } else {
+    const missing = upstreamNames.filter((n) => !ourNames.includes(n));
+    const extra = ourNames.filter((n) => !upstreamNames.includes(n));
+    if (missing.length) {
+      problems.push(
+        `本仓上游工具清单缺少 ${missing.length} 个工具名：${missing.join(', ')}` +
+          '（MCP 客户端按名调用，缺名字就是「这个能力用不了」且没有任何报错）',
+      );
+    }
+    if (extra.length) {
+      problems.push(`本仓上游工具清单有上游不存在的名字：${extra.join(', ')}（多出的名字没有依据）`);
+    }
+    if (missing.length === 0 && extra.length === 0) {
+      console.log(`上游工具名逐字一致（${upstreamNames.length} 个）`);
+    }
+  }
+} else {
+  console.log(
+    `未找到上游镜像（${schemasPath}）：工具名一致性检查**已降级**。` +
+      '执行 `make upstream-watch` 拉取上游镜像后可完整校验。',
+  );
 }
 
 console.log('上游雷达自检');

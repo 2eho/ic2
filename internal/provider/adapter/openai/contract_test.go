@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -299,9 +300,14 @@ func TestPromptCompositionNumbering(t *testing.T) {
 	}
 }
 
+// TestUnsupportedCapability 覆盖「适配器不认识的能力」这条路径。
+//
+// 上一版这里用 CapImageUpscale 当例子，但 5.5 补齐后 upscale 已经是支持的能力，
+// 于是这条用例变成在验「upscale 需要源图」——那是另一件事。
+// 现在改成构造一个确实不在能力表里的值，用例名与断言才重新对得上。
 func TestUnsupportedCapability(t *testing.T) {
 	_, err := newAdapter().Invoke(context.Background(), testCred("http://example.com"), provider.Request{
-		Capability: provider.CapImageUpscale,
+		Capability: provider.Capability("image.unknown"),
 	})
 	if err == nil {
 		t.Fatal("不支持的能力应报错")
@@ -310,6 +316,94 @@ func TestUnsupportedCapability(t *testing.T) {
 	if !ok || pe.Code != "unsupported_capability" {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+// TestUpscaleRequiresSourceImage：超分没有源图时必须**在发请求之前**失败，
+// 否则用户会看到一个从上游返回的、与本地上传无关的错误。
+func TestUpscaleRequiresSourceImage(t *testing.T) {
+	_, err := newAdapter().Invoke(context.Background(), testCred("http://example.com"), provider.Request{
+		Capability: provider.CapImageUpscale,
+	})
+	pe, ok := err.(*provider.ProviderError)
+	if !ok || pe.Code != platform.CodeInvalidRequest {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestUpscaleSendsReferenceImage：超分必须真的把源图放进 multipart，
+// 而不是「返回一个空的成功」。
+func TestUpscaleSendsReferenceImage(t *testing.T) {
+	var body string
+	var contentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"aGk="}]}`))
+	}))
+	defer srv.Close()
+
+	res, err := newAdapter().Invoke(context.Background(), testCred(srv.URL), provider.Request{
+		Capability: provider.CapImageUpscale,
+		Model:      "my-superres-model",
+		Count:      1,
+		Inputs: []provider.ResolvedInput{
+			{Kind: "image", AssetID: "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("PNG")), Label: "图片1"},
+		},
+		Params: map[string]any{"scale": float64(4)},
+	})
+	if err != nil {
+		t.Fatalf("超分调用失败: %v", err)
+	}
+	if !strings.Contains(contentType, "multipart/form-data") {
+		t.Fatalf("应当是 multipart 请求: %s", contentType)
+	}
+	// multipart 里的文件名必须带序号，否则「图片2」在日志里无法定位
+	if !strings.Contains(body, "ref1.png") {
+		t.Fatalf("参考图未按序号上传: %s", body[:min(400, len(body))])
+	}
+	if len(res.Assets) != 1 {
+		t.Fatalf("结果解析失败: %#v", res.Assets)
+	}
+}
+
+// TestImageEditUploadsAllReferencesInOrder：蒙版双参考（5.1）依赖
+// 「上传顺序 = 语义顺序」。一旦顺序被打乱，症状是「蒙版被当成原图」，
+// 而界面上参数全部正常。
+func TestImageEditUploadsAllReferencesInOrder(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"aGk="}]}`))
+	}))
+	defer srv.Close()
+
+	_, err := newAdapter().Invoke(context.Background(), testCred(srv.URL), provider.Request{
+		Capability: provider.CapImageEdit,
+		Model:      "edit-model",
+		Prompt:     "只改遮罩区域",
+		Count:      1,
+		Inputs: []provider.ResolvedInput{
+			{Kind: "image", AssetID: "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("ORIGINAL")), Label: "图片1"},
+			{Kind: "image", AssetID: "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("MASK")), Label: "图片2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("编辑调用失败: %v", err)
+	}
+	i1 := strings.Index(body, "ref1.png")
+	i2 := strings.Index(body, "ref2.png")
+	if i1 < 0 || i2 < 0 || i1 > i2 {
+		t.Fatalf("参考图顺序错误（图片1 必须在图片2 之前）: %d %d", i1, i2)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func TestAdapterCapabilitiesCoverMatrix(t *testing.T) {

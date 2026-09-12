@@ -24,6 +24,40 @@ func (a *APIService) CreateSession(ctx context.Context, wsID, canvasID, backend,
 	return toSessionDTO(sess), nil
 }
 
+// SessionsForCanvas 见 api.CanvasSessionSnapshotter（2.11：随画布导出会话快照）。
+//
+// 实现放在 APIService 而不是再包一层适配器：`deps.Agent` 已经是这个对象，
+// 而「导出画布时会话快照」正是它的能力 —— 再引一个类型只会让装配多一个
+// 需要同步的注入点，而注入点漏接的表现是「导出里没有会话，也没人知道为什么」。
+func (a *APIService) SessionsForCanvas(ctx context.Context, canvasID string, limit int) ([]api.AgentSnapshot, error) {
+	snaps, err := a.svc.SessionsForCanvas(ctx, canvasID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.AgentSnapshot, 0, len(snaps))
+	for _, s := range snaps {
+		turns := make([]map[string]any, 0, len(s.Turns))
+		for _, t := range s.Turns {
+			items := make([]map[string]any, 0, len(t.Items))
+			for _, it := range t.Items {
+				items = append(items, map[string]any{
+					"kind": it.Kind, "text": it.Text, "at": it.At, "redacted": it.Redacted,
+				})
+			}
+			turns = append(turns, map[string]any{
+				"seq": t.Seq, "status": t.Status, "input": t.Input, "items": items,
+			})
+		}
+		out = append(out, api.AgentSnapshot{
+			"id": s.ID, "canvasId": s.CanvasID, "threadId": s.ThreadID,
+			"title": s.Title, "createdAt": s.CreatedAt, "turns": turns,
+		})
+	}
+	return out, nil
+}
+
+var _ api.CanvasSessionSnapshotter = (*APIService)(nil)
+
 // GetSession 见 api.AgentService。
 func (a *APIService) GetSession(ctx context.Context, sessionID string) (*api.AgentSessionDTO, error) {
 	sess, err := a.svc.GetSession(ctx, sessionID)

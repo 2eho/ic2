@@ -76,8 +76,41 @@ Go 服务端，但 v0.4.0 已删除，`find . -name '*.go'` 与 `find . -name 'g
 
 | # | 项 | 落点 | 状态 |
 | --- | --- | --- | --- |
-| 1 | MCP 工具面 34 → 14 的缺口（含 `workbench_*`、`canvas_list_projects`、`site_navigate`、`assets_list`/`assets_add`、`generation_get_status` 等） | `10-parity-matrix.md` §9.5 目前标 `done` 但只覆盖 14 个，属**过度声明**，需改回 `wip` 并排期 | 待改 |
-| 2 | `IMAGE_MAX_EDGE` 上游 3840 / 本仓 4096 的口径差异 | 把「上游 IMAGE_MAX_EDGE=3840、MAX_UPSCALE_LONG_EDGE=4096」写进 `docs/design/11` §2.1；本仓 UI 不提供 3840 以外的比例组合，因此实际不可达 | 待补说明 |
+| 1 | MCP 工具面 34 → 14 的缺口 | `internal/agent/tools_upstream.go` 已补齐 34 个名字，并由 `check-upstream-radar` 对**上游真源**逐字校验 | ✅ 已处理 |
+| 2 | `IMAGE_MAX_EDGE` 上游 3840 / 本仓 4096 的口径差异 | 已写进 `docs/design/11` §2.1；本仓 UI 不提供 3840 以外的比例组合，因此实际不可达 | ✅ 已处理 |
+
+## 2026-09-12 · 第二轮：工具面补完 + 巡检升级为改写队列
+
+- 上游版本：`v0.18.0`，commit `d213a74`（无变化）
+- 巡检结论：本轮的重点不是上游变了，而是**我们自己的对照机制不够硬**
+
+### 这一轮修掉的三处「机制缺陷」
+
+上一轮已经修过 `docs/upstream/` 产物缺失与 3 个同步链路缺陷。但那之后又暴露了两件事：
+
+| # | 缺陷 | 表现 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 工具面对照**没有门禁** | §9.5 的「34 个工具名」只能靠人读上游源码核对。上一轮标了 `done` 而后被发现只有 14 个，说明「人工核对」这件事本身不可靠 | `check-upstream-radar.mjs` 新增第 4 段：从上游真源 `canvas-agent/src/canvas/schemas.ts` 解析 `toolNames`，与本仓 `UpstreamToolNames()` **逐字**比对（多一个少一个都红）。无上游镜像时**显式打印「已降级」**，不静默通过 |
+| 2 | 巡检产物只说「变了什么」，没说「要改哪里」 | 一份需要读者自己推导落点的报告，实际结局是被跳过 | `report-upstream.mjs` 新增 `rewriteQueue`：每条变化都带 **落点 / 动作 / 验收** 三件套（落点表 `LANDING` 与探针一一对应）。拿不到落点的变化**也要出现**并标注「需人工判断落点」——静默丢弃等于「没落在队列里」＝「没发生」 |
+| 3 | 队列逻辑**没有被测** | 只测 baseline / noise 两条路径的话，它们产出的队列都是空的 —— 队列逻辑坏了也测不出来（这与上一轮「产物存在但是空壳」是同一类问题） | 夹具里造一次**真实的契约面变化**（新增工具名），断言 `verdict != noise`、`rewriteQueue` 非空、`toolsAdded` 条目的 where/action/verify 都已登记、且 items 里真的有那个名字 |
+
+### 契约面对照（v0.18.0 → 本仓）
+
+| 契约面 | 上游 | 本仓 | 结论 |
+| --- | --- | --- | --- |
+| MCP 工具 | 34（`canvas-agent/src/canvas/schemas.ts`） | **34**（逐字一致，含 10 个别名直通） | ✅ 对等 |
+| i18n key | 162 | 312 | 命名空间不同（DIV-07/08）；无遗漏同名 key |
+| 节点类型 | 6 | 7 | 见 `10-parity-matrix.md` §2.13 |
+| op 类型 | 8 | 14 | 上游 8 个全部有等价或更强替代 |
+| Provider 端点 | `/v1`、`/v1beta`、`/audio/speech` | 同族 + **自定义脚本渠道** | `contracts/openapi.yaml` 双向校验 |
+| 边界常量 | 9 个 | 全覆盖 | 已固化差异说明（见 `docs/design/11` §2.1） |
+| 语言构成 | TS 单栈（go 0） | Go + TS | 上游仍无 Go；`languages` 探针会报出变化 |
+
+### 下一轮巡检要看的
+
+1. 上游是否新增/改名工具名 → 队列里的 `toolsAdded`/`toolsRemoved` 会直接给出落点
+2. 上游是否统一 `IMAGE_MAX_EDGE` 与超分上限（统一后本仓可收紧到同一数值）
+3. 上游是否引入非 TS 服务端（`languages` 探针）
 
 ## 下一次巡检要看什么
 

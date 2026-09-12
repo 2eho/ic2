@@ -317,6 +317,41 @@ export class CanvasKernel {
         this.interaction.commitOrigin(this.lastPoint ?? { x: 0, y: 0 });
         return ops;
       }
+      case "start-connect":
+      case "connect-drag":
+      case "cancel-connect": {
+        // 预览线段由 UI 层绘制（它需要屏幕坐标），内核不保留瞬时交互态：
+        // 内核状态一旦包含「正在拖的线」，重放/快照就必须解释它，
+        // 而它不是文档的一部分。
+        this.notify();
+        return [];
+      }
+      case "commit-connect": {
+        const edge = this.createEdge(
+          intent.fromNodeId,
+          intent.fromPort,
+          intent.toNodeId,
+          intent.toPort,
+        );
+        if (!edge) {
+          // 端口类型不匹配或自连：给出可观测信号而不是静默无反应。
+          this.notify();
+          return [];
+        }
+        return this.takePendingOps();
+      }
+      case "commit-connect-blank": {
+        // 3.7：落点是空白。内核只负责「暴露这个事实」，
+        // 具体弹什么菜单由 UI 决定（内核不 import react，也不该知道菜单）。
+        this.lastConnectBlank = {
+          x: intent.point.x,
+          y: intent.point.y,
+          fromNodeId: intent.fromNodeId,
+          fromPort: intent.fromPort,
+        };
+        this.notify();
+        return [];
+      }
       case "resize": {
         const id = this.selection.nodes[0];
         if (!id) return [];
@@ -336,6 +371,26 @@ export class CanvasKernel {
       default:
         return [];
     }
+  }
+
+  /**
+   * 最近一次「连线落在空白处」的位置（3.7）。
+   *
+   * 单独存成字段而不是塞进事件回调：CanvasSurface 是重渲染驱动的，
+   * 用回调会引入「React 状态与内核状态谁先更新」的竞态。
+   */
+  lastConnectBlank: {
+    x: number;
+    y: number;
+    fromNodeId: string;
+    fromPort: string;
+  } | null = null;
+
+  /** 取出并清空「连线落在空白处」事件。 */
+  takeConnectBlank() {
+    const v = this.lastConnectBlank;
+    this.lastConnectBlank = null;
+    return v;
   }
 
   /** 最近一次指针位置（拖拽 origin 复位与框选用）。 */

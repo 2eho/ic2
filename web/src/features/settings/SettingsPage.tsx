@@ -5,6 +5,9 @@ import { useWorkspace } from "./useWorkspace";
 import { PluginManager } from "@/features/plugins/PluginManager";
 import { PrefsPanel } from "./PrefsPanel";
 import { ConfigTransfer } from "./ConfigTransfer";
+import { DirectConnectPanel } from "./DirectConnectPanel";
+import { ScriptEditor } from "./ScriptEditor";
+import { usePrefs } from "./usePrefs";
 import { ModelSelectModal } from "./ModelSelectModal";
 import type { TFn } from "@/app/App";
 
@@ -24,6 +27,11 @@ export function SettingsPage({
 }) {
   const { workspaceId, ready } = useWorkspace();
   const qc = useQueryClient();
+  // 偏好在这里读一次，传给需要它的子面板（避免每个面板各发一次请求）
+  const {
+    prefs,
+    update: updatePrefs,
+  } = usePrefs(workspaceId, ready);
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.meta });
   const providers = useQuery({
     queryKey: ["providers", workspaceId],
@@ -122,6 +130,18 @@ export function SettingsPage({
         locale={locale}
         onThemeChange={onThemeChange}
         onLocaleChange={onLocaleChange}
+      />
+
+      {/* 本地直连模式（4.21）：默认关闭、必须显式确认风险、范围可选 */}
+      <DirectConnectPanel t={t} prefs={prefs} update={updatePrefs} />
+
+      <ScriptEditorSection
+        t={t}
+        workspaceId={workspaceId}
+        providerId={provider.id}
+        onSaved={() =>
+          qc.invalidateQueries({ queryKey: ["providers", workspaceId] })
+        }
       />
 
       {/* 渠道与凭据：密钥只提交一次，服务端加密，界面只显示掩码（INV-5） */}
@@ -363,5 +383,51 @@ export function SettingsPage({
         </p>
       </section>
     </div>
+  );
+}
+
+
+/**
+ * 自定义调用脚本入口（4.14）。
+ *
+ * 单独一个小节而不是塞进渠道表单：脚本是「协议映射」，
+ * 与「地址 + 密钥」是两种不同的关注点，混在一起会让表单长到没人愿意读。
+ */
+function ScriptEditorSection({
+  t,
+  workspaceId,
+  providerId,
+  onSaved,
+}: {
+  t: TFn;
+  workspaceId: string;
+  providerId: string;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="ic-card" style={{ padding: 16, marginBottom: 16 }}>
+      <h2 style={{ fontSize: 15, marginTop: 0 }}>
+        {t("settings.scriptEditor")}
+      </h2>
+      <p className="ic-dim" style={{ fontSize: 12, marginTop: 0 }}>
+        {t("settings.scriptEditorHint")}
+      </p>
+      <button className="ic-btn" onClick={() => setOpen(true)}>
+        {t("settings.scriptOpen")}
+      </button>
+      {open && (
+        <ScriptEditor
+          t={t}
+          workspaceId={workspaceId}
+          providerId={providerId}
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            setOpen(false);
+            onSaved();
+          }}
+        />
+      )}
+    </section>
   );
 }

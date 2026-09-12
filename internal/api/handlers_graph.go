@@ -244,11 +244,24 @@ func (h *handlers) exportCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", doc.ID+".json"))
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"version": 3,
 		"kind":    "ic-canvas-export",
 		"canvas":  doc,
-	})
+	}
+	// 2.11：随画布导出助手会话的**只读快照**。
+	//
+	// 为什么是快照而不是完整会话：工具调用参数里可能带凭据、URL、内网地址，
+	// 而导出文件经常被贴进聊天群或存网盘。快照保留「当时聊了什么」，
+	// 并把非文本条目显式标为 redacted（用户能看出发生过工具调用，
+	// 而不是以为会话不完整）。
+	if snap, ok := h.deps.Agent.(CanvasSessionSnapshotter); ok && h.deps.Agent != nil {
+		if sessions, serr := snap.SessionsForCanvas(r.Context(), doc.ID, 5); serr == nil && len(sessions) > 0 {
+			payload["agentSessions"] = sessions
+			payload["agentSessionsNote"] = "只读快照：非文本条目已裁剪（可能含凭据/内网地址）"
+		}
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // canvasEvents 是 SSE 多路复用通道。

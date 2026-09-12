@@ -30,9 +30,18 @@ func OpenDB(cfg Config) (*DB, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite: %w", err)
 		}
-		// SQLite 单写者：限制连接数避免 write lock 争用。
-		db.SetMaxOpenConns(1)
-		db.SetMaxIdleConns(1)
+		// SQLite 单写者：**写**必须串行，因此限制连接数避免 write lock 争用。
+		//
+		// 但连接数不能是 1：一个 HTTP 请求里常常需要「先查 A、再查 B」，
+		// 而单连接下如果任一查询的 Rows 未关闭（或被外层持有），
+		// 后续查询会阻塞到超时。实测表现极具误导性：报错是
+		// 「context deadline exceeded」，而真正的原因是连接池饿死。
+		//
+		// 取值 4：足够覆盖「一个请求内的多步查询」与少量并发读，
+		// 同时远小于「写争用变得频繁」的阈值。写串行由 SQLite 的
+		// 文件锁 + busy_timeout 保证，不依赖连接数。
+		db.SetMaxOpenConns(4)
+		db.SetMaxIdleConns(4)
 		db.SetConnMaxLifetime(0)
 		if err := db.Ping(); err != nil {
 			return nil, fmt.Errorf("ping sqlite: %w", err)

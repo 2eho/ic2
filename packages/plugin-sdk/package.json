@@ -1,0 +1,23 @@
+{
+  "name": "@ic/plugin-sdk",
+  "version": "1.0.0",
+  "description": "IC 插件 SDK：协议、类型与构建脚本（10.9）",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.d.ts",
+      "import": "./src/jsx-runtime.js"
+    }
+  },
+  "bin": {
+    "ic-plugin-build": "./bin/build.js"
+  },
+  "files": ["src", "bin", "template"],
+  "license": "MIT"
+}

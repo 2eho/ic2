@@ -93,6 +93,8 @@ func (s StepStatus) Terminal() bool {
 type Attempt struct {
 	Index      int
 	ProviderID string
+	// ProtocolID 是协议名（openai/gemini/script），与 ProviderID（渠道行 id）区分。
+	ProtocolID string
 	ModelID    string
 	RequestID  string
 	Status     StepStatus

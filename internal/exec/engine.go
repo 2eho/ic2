@@ -314,8 +314,13 @@ func (e *Engine) runStep(ctx context.Context, run *Run, step *Step, ps *PlanStep
 		})
 		latency := e.clock.Since(start)
 
+		// ProviderID 记**渠道行 id**（用户可辨认的「哪条渠道」），
+		// ProtocolID 记协议名（决定「怎么发请求」）。
+		// 只记协议名会让「同一个 openai 协议下的两个渠道」在审计日志里
+		// 无法区分 —— 而排查计费问题时首先要回答的正是「走的哪条渠道」。
 		att := Attempt{
-			Index: attempt, ProviderID: cred.ProviderID, ModelID: ps.Model,
+			Index: attempt, ProviderID: firstNonEmptyStr(cred.SourceProviderID, cred.ProviderID),
+			ProtocolID: cred.ProviderID, ModelID: ps.Model,
 			RequestID: requestID, Latency: latency,
 		}
 		if ierr != nil {
@@ -347,7 +352,9 @@ func (e *Engine) runStep(ctx context.Context, run *Run, step *Step, ps *PlanStep
 		if oerr != nil {
 			return oerr
 		}
-		usage := ApplyCost(e.adapters.Pricing(cred.ProviderID, ps.Model), res.Usage)
+		// 价格表按**渠道**配置（同一协议的不同渠道可能加价不同），
+		// 因此用渠道行 id 查询；拿不到时回落到协议名。
+		usage := ApplyCost(e.adapters.Pricing(firstNonEmptyStr(cred.SourceProviderID, cred.ProviderID), ps.Model), res.Usage)
 		att.Status = StepSucceeded
 		att.Usage = usage
 		att.RemoteTask = res.RemoteTask
@@ -498,6 +505,13 @@ func dependsOnNodes(doc *graph.CanvasDocument, nodeID string) []string {
 		}
 	}
 	return out
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func toProviderError(err error) *provider.ProviderError {

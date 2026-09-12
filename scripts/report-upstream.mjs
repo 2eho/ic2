@@ -235,7 +235,108 @@ const contractTouched = [
 const isBaseline = !prior;
 const verdict = isBaseline ? "baseline" : securityRelevant ? "security-fix" : contractTouched ? "contract-change" : "noise";
 
-fs.writeFileSync(REPORT_PATH, JSON.stringify({ from: { version: PREV_VERSION, commit: PREV_COMMIT }, to: { version: VERSION, commit: COMMIT }, changelog, probes: changed, verdict }, null, 2));
+/**
+ * 把契约面变化翻译成**可执行的改写队列**。
+ *
+ * 为什么要有这一步：原来的产物只说「上游变了什么」，而这只回答了半个问题。
+ * 一份报告如果读完还需要人再去想「那我们要改哪里」，它的实际结局就是被跳过
+ * ——上一轮的 `docs/upstream/` 长期没被写过一个字，正是这个原因。
+ *
+ * 所以每条变化都必须给出三件事：
+ *   1. **落点**：本仓哪个文件是这个契约面的对应位置；
+ *   2. **动作**：具体要做什么（不是「关注一下」）；
+ *   3. **验收**：改完怎么证明（跑哪条门禁/哪条用例）。
+ *
+ * 拿不到落点的变化**也要列出来**（action 里写明「需人工判断落点」）：
+ * 静默丢弃会让「没落在队列里」等价于「没发生」。
+ */
+const LANDING = {
+  i18nKeysAdded: {
+    where: "web/src/shared/i18n/{zh-CN,en-US}.ts",
+    action: "对照上游新增文案，补充我们对应的 key（注意命名空间不同，见 DIV-07）",
+    verify: "node scripts/check-i18n-dupkeys.mjs && cd web && npm run lint",
+  },
+  nodeTypesAdded: {
+    where: "internal/graph/spec.go + web/src/features/canvas/kernel/schema.ts",
+    action: "评估新节点类型：需要就加 schema（前后端两处），不需要就写进 divergences.md 并说明",
+    verify: "node scripts/check-node-schema.mjs && go test ./internal/graph/",
+  },
+  opTypesAdded: {
+    where: "internal/graph/op.go + contracts/ops.schema.json",
+    action: "新增 op kind 必须同时改契约与 apply 分派（rebase/重放也要能处理）",
+    verify: "make gen-check && go test ./internal/graph/",
+  },
+  toolsAdded: {
+    where: "internal/agent/tools_upstream.go（UpstreamToolNames）",
+    action: "把新工具名加入上游清单，并在 dispatch_upstream.go 里给出落位；无对应能力时返回 not_implemented",
+    verify: "go test ./internal/agent/ -run TestUpstreamToolNamesAllRegistered",
+  },
+  toolsRemoved: {
+    where: "internal/agent/tools_upstream.go",
+    action: "上游删除的工具名：从清单里移除，并在 divergences.md 记录（客户端可能仍在调用）",
+    verify: "go test ./internal/agent/",
+  },
+  pluginFieldsAdded: {
+    where: "internal/plugin/manifest.go + packages/plugin-sdk/src/index.d.ts",
+    action: "插件清单新增字段要与宿主校验、SDK 类型两处同步",
+    verify: "go test ./internal/plugin/ && node --test packages/plugin-sdk/src/sdk.test.js",
+  },
+  endpointsAdded: {
+    where: "internal/provider/adapter/*.go",
+    action: "上游新增的 Provider 端点：在适配器里实现或登记为不支持（不要静默忽略）",
+    verify: "go test ./internal/provider/...",
+  },
+  limitsChanged: {
+    where: "internal/graph/limits.go + docs/design/11",
+    action: "边界常量变化：改代码真源，再跑 check-boundaries 同步文档",
+    verify: "node scripts/check-boundaries.mjs",
+  },
+  languagesAdded: {
+    where: "docs/upstream/sync-log.md",
+    action: "上游引入新语言（尤其 Go）是架构级信号：记录结论并评估是否影响我们的形态判断",
+    verify: "人工确认（写入 sync-log）",
+  },
+};
+
+function buildQueue(changed) {
+  const queue = [];
+  for (const [key, value] of Object.entries(changed)) {
+    if (!Array.isArray(value) || value.length === 0) continue;
+    if (key.endsWith("Removed") && key !== "toolsRemoved") continue;
+    const landing = LANDING[key] ?? {
+      where: "（需人工判断落点）",
+      action: "契约面变化但未登记落点：请在 docs/upstream/sync-log.md 记录并补充本表",
+      verify: "人工确认",
+    };
+    queue.push({
+      probe: key,
+      items: value.slice(0, 50),
+      truncated: value.length > 50,
+      where: landing.where,
+      action: landing.action,
+      verify: landing.verify,
+    });
+  }
+  return queue;
+}
+
+const queue = buildQueue(changed);
+
+fs.writeFileSync(REPORT_PATH, JSON.stringify({
+  from: { version: PREV_VERSION, commit: PREV_COMMIT },
+  to: { version: VERSION, commit: COMMIT },
+  changelog,
+  probes: changed,
+  verdict,
+  // 改写队列：每条都有落点、动作、验收
+  rewriteQueue: queue,
+  // 一句话结论，供 CI 日志与 Issue 标题直接用
+  summary: verdict === "baseline"
+    ? "首次建立基线，无未处理项"
+    : verdict === "noise"
+      ? "上游契约面无变化"
+      : `上游契约面有 ${queue.length} 类变化，待改写到本仓`,
+}, null, 2));
 fs.writeFileSync(priorPath, JSON.stringify(probes, null, 2));
 
 console.log(`verdict=${verdict}`);

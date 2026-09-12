@@ -106,6 +106,8 @@ lint: ## 静态检查：vet + 架构约束 + CI 配置 + 前端 tsc
 	node scripts/check-features-boundary.mjs
 	node scripts/check-file-size.mjs
 	node scripts/check-no-silent-skip.mjs
+	# 非锚定 .gitignore 规则会静默吞掉发布物（已发生 2 次：docs/upstream/ 与 SDK 的 bin/）
+	node scripts/check-gitignore-anchoring.mjs
 
 .PHONY: tsc
 tsc: deps-web-check ## 前端类型检查
@@ -124,6 +126,12 @@ test-go: ## 仅 Go 单测（无前端依赖时用）
 .PHONY: test-agent
 test-agent: ## 本机桥接器单测（事件归一化 + 安全边界）
 	cd canvas-agent && node --test src/*.test.js
+
+.PHONY: test-sdk
+test-sdk: ## 插件 SDK 单测（清单校验 + JSX runtime 的属性白名单 + 构建脚本）
+	# SDK 是给第三方作者用的**对外契约**，它的类型与运行时必须有门禁：
+	# 没有门禁时「协议新增一个字段、SDK 没跟上」只能等作者踩坑才发现。
+	cd packages/plugin-sdk && node --test src/sdk.test.js
 
 .PHONY: cover
 cover: test ## 覆盖率报告
@@ -215,7 +223,7 @@ perf: deps-web-check ## 性能预算校验（内核 + 视口；见 docs/design/1
 	node scripts/perf-budget.mjs
 
 .PHONY: check
-check: preflight gen-check fmt-check lint test test-agent agent-check adversary boundaries parity sec drill upstream-radar ## 本地全套门禁（CI 用这一个）
+check: preflight gen-check fmt-check lint test test-agent test-sdk agent-check adversary boundaries parity sec drill upstream-radar ## 本地全套门禁（CI 用这一个）
 
 .PHONY: check-all
 check-all: check tsc e2e-build e2e perf ## 全套 + 前端类型/端到端/性能
