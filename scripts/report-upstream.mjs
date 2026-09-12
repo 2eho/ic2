@@ -76,12 +76,37 @@ const i18nKeys = () => {
   return [...keys].sort();
 };
 
+/**
+ * CHANGELOG 只取**本次变化涉及的那一段**，不是文件开头 40 行。
+ *
+ * 这里踩过一个真实的坑：原实现固定截取文件开头 40 行，于是 v0.18.0 已经发布、
+ * 上游「未变化」时，判定仍然是 `security-fix`——因为那 40 行里恰好有几条历史
+ * 安全修复（Agent 令牌脱敏 / 配置目录权限）。后果是**每次巡检都产出一条安全告警**，
+ * 而安全告警一旦常态化就会被忽略，等于没有告警。
+ *
+ * 现在的口径：取 `## Unreleased`（若有内容）到 `to.version` 所在小节的内容。
+ * 上游未变化时这段为空 → verdict 落回 noise。
+ */
 const changelog = (() => {
-  const text = read("CHANGELOG.md");
+  const lines = read("CHANGELOG.md").split("\n");
+  // 小节头形如 `## v0.18.0 - 2026-09-07`；Unreleased 也算一个小节。
+  const heads = [];
+  lines.forEach((line, i) => {
+    const m = line.match(/^##\s+(.+?)\s*$/);
+    if (m) heads.push({ title: m[1].trim(), line: i });
+  });
+  const wanted = heads.filter(
+    (h) => /^unreleased/i.test(h.title) || (VERSION && h.title.startsWith(VERSION)),
+  );
+  const picked = wanted.length ? wanted : heads.slice(0, 1);
   const out = [];
-  for (const line of text.split("\n")) {
-    const m = line.match(/^\+\s*\[(新增|调整|修复|优化)\]\s*(.+)$/);
-    if (m) out.push({ tag: m[1], text: m[2].trim() });
+  for (const h of picked) {
+    const next = heads.find((x) => x.line > h.line);
+    const body = lines.slice(h.line + 1, next ? next.line : lines.length);
+    for (const line of body) {
+      const m = line.match(/^\+\s*\[(新增|调整|修复|优化)\]\s*(.+)$/);
+      if (m) out.push({ tag: m[1], text: m[2].trim() });
+    }
   }
   return out.slice(0, 40);
 })();
@@ -114,6 +139,45 @@ const probes = {
     return limits;
   })(),
   pluginFields: unionLiterals(read("plugins/canvas/sdk/src/types.ts")),
+  /**
+   * 上游**语言构成**探针。
+   *
+   * 加这一项的起因是一个具体的疑问：「原仓库是不是改 Go 了？」
+   * 这个问题没法靠读 CHANGELOG 回答——上游 v0.0.4 的 CHANGELOG 里确实出现过
+   * 「内部 Go 服务」，v0.4.0 又写着「移除后端」。也就是说，只看文字记录会得出
+   * 相反的结论。所以这里把语言构成变成**可核对的事实**：
+   * 一旦上游真的引入 Go（或任何非 TS 服务端），巡检必须报出来。
+   *
+   * 只统计源码扩展名，不扫 node_modules（否则数量会被依赖淹没）。
+   */
+  languages: (() => {
+    const exts = [".ts", ".tsx", ".js", ".mjs", ".go", ".py", ".rs", ".java", ".rb", ".php"];
+    const counts = {};
+    const walkDir = (dir) => {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (["node_modules", "dist", "build", ".git", ".next", "coverage"].includes(entry.name)) continue;
+          walkDir(full);
+        } else {
+          const ext = path.extname(entry.name);
+          if (exts.includes(ext)) counts[ext] = (counts[ext] || 0) + 1;
+        }
+      }
+    };
+    walkDir(CLONE_DIR);
+    // 输出成 `go=0` 这种可 diff 的键值，避免报告里出现对象导致比对逻辑走偏。
+    return Object.entries(counts)
+      .filter(([, n]) => n > 0)
+      .map(([ext, n]) => `${ext.replace(".", "")}=${n}`)
+      .sort();
+  })(),
 };
 
 const priorPath = path.join(path.dirname(REPORT_PATH), "baseline-probes.json");
@@ -137,13 +201,25 @@ const changed = prior
       pluginFieldsAdded: diffSets(probes.pluginFields, prior.pluginFields).added,
       endpointsAdded: diffSets(probes.endpoints, prior.endpoints).added,
       endpointsRemoved: diffSets(probes.endpoints, prior.endpoints).removed,
+      // 语言构成变化（尤其是「上游引入 Go 服务端」）是架构级信号，必须报出来。
+      languagesAdded: diffSets(probes.languages, prior.languages).added,
+      languagesRemoved: diffSets(probes.languages, prior.languages).removed,
       limitsChanged: Object.entries(probes.limits)
         .filter(([k, v]) => prior.limits?.[k] !== undefined && String(prior.limits[k]) !== String(v))
         .map(([name, to]) => ({ name, from: prior.limits[name], to })),
     }
   : { baseline: true };
 
-const securityRelevant = changelog.some((x) => /安全|漏洞|凭据|密钥|权限|脱敏|XSS|注入/.test(x.text));
+/**
+ * 安全判定只在「上游真的动了」时才生效。
+ *
+ * 与 changelog 的截取范围是同一类问题：上游停更时，CHANGELOG 里那些历史安全修复
+ * 仍然存在，于是每次巡检都报 security-fix。安全告警一旦常态化就不会有人看，
+ * 这条判定也就等于没有。判据收紧为「版本或 commit 发生变化」。
+ */
+const upstreamMoved = Boolean(VERSION) && Boolean(PREV_VERSION) && (VERSION !== PREV_VERSION || COMMIT !== PREV_COMMIT);
+const securityRelevant =
+  upstreamMoved && changelog.some((x) => /安全|漏洞|凭据|密钥|权限|脱敏|XSS|注入/.test(x.text));
 const contractTouched = [
   changed.i18nKeysAdded,
   changed.nodeTypesAdded,
@@ -152,6 +228,7 @@ const contractTouched = [
   changed.pluginFieldsAdded,
   changed.endpointsAdded,
   changed.limitsChanged,
+  changed.languagesAdded,
 ].some((arr) => Array.isArray(arr) && arr.length > 0);
 
 // 首次运行没有基线可比，任何判定都是误报，单独归类为 baseline。

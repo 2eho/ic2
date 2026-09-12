@@ -21,11 +21,33 @@ import { join } from 'node:path';
 const problems = [];
 const DIVERGENCE_DOC = 'docs/design/12-legacy-and-upstream.md';
 
+// ------------------------------------------------------------- 0) 产物必须真的会被提交
+// 这里覆盖一个**实际发生过**的缺陷：`.gitignore` 里的 `upstream/` 会匹配任意层级的
+// 同名目录，于是 `docs/upstream/`（本应随代码一起发布的同步记录）被静默忽略。
+// 后果极隐蔽：文件在本地存在、门禁在本地绿、`git status` 却干净——
+// 本地检查读的是文件系统，而发布读的是 git。所以门禁必须**问 git**，不能只看文件在不在。
+const tracked = (file) => {
+  const r = spawnSync('git', ['ls-files', '--error-unmatch', file], { encoding: 'utf8' });
+  return r.status === 0;
+};
+const ignored = (file) => {
+  const r = spawnSync('git', ['check-ignore', '-q', file], { encoding: 'utf8' });
+  return r.status === 0;
+};
+
 // ------------------------------------------------------------- 1) 产物文件存在且非占位
 for (const f of ['docs/upstream/sync-log.md', 'docs/upstream/divergences.md']) {
   if (!existsSync(f)) {
     problems.push(`缺少 ${f}（docs/design/12 §7 的落地检查项）`);
     continue;
+  }
+  if (ignored(f)) {
+    problems.push(
+      `${f} 被 .gitignore 忽略：文件在本地存在但永远不会被提交。` +
+        '检查 .gitignore 是否把 `upstream/` 写成了非锚定的形式（应为 `/upstream/`）',
+    );
+  } else if (!tracked(f)) {
+    problems.push(`${f} 未被 git 跟踪（记得 git add，否则发布物里没有它）`);
   }
   const body = readFileSync(f, 'utf8');
   // 占位文件的判据：没有表格行、没有日期锚点、字数过少
@@ -89,6 +111,27 @@ try {
     'i18n.t("canvas.addNode");\ni18n.t("canvas.deleteNode");\n',
   );
   w('VERSION', 'v0.0.0-fixture\n');
+  // 语言探针的夹具：上游是 TS 单栈。这里刻意放一个 `.go` 文件，
+  // 验证探针**能识别出 Go**——否则「上游没改 Go」这个结论就没有证据。
+  w('cmd/server/main.go', 'package main\n\nfunc main() {}\n');
+  w(
+    'CHANGELOG.md',
+    [
+      '# CHANGELOG',
+      '',
+      '## Unreleased',
+      '',
+      '## v0.0.0-fixture - 2026-01-01',
+      '',
+      '+ [修复] 历史遗留的凭据脱敏问题（上游未变化时不该被报成本次 security-fix）。',
+      '',
+      '## v0.0.0-older - 2025-01-01',
+      '',
+      '+ [修复] 更早的一条凭据泄露修复（用来验证判定只看「本次版本小节」，'
+        + '而不是文件开头若干行）。',
+      '',
+    ].join('\n'),
+  );
 
   const r = spawnSync(
     'node',
@@ -122,10 +165,19 @@ try {
       for (const [key, why] of [
         ['i18nKeys', 'i18n key（最灵敏的新功能探针）'],
         ['nodeTypes', '节点类型枚举'],
+        ['languages', '上游语言构成（用于回答「上游是否引入 Go 服务端」这类问题）'],
       ]) {
         if (!Array.isArray(raw[key]) || raw[key].length === 0) {
           problems.push(`探针未从夹具中抽出 ${key}（${why}）：正则可能已失效，雷达会静默漏报`);
         }
+      }
+      // 语言探针必须真的能认出 Go：夹具里放了 main.go，抽不出 go=1 就说明探针失效，
+      // 「上游是否改 Go」这个问题就只能靠读 CHANGELOG 猜（CHANGELOG 里两种说法都有）。
+      if (!raw.languages?.includes('go=1')) {
+        problems.push(
+          `语言探针未识别夹具里的 Go 文件（实得 ${JSON.stringify(raw.languages)}）：` +
+            '这样「上游是否引入 Go 服务端」无法被事实核对',
+        );
       }
     }
     // 首次运行没有基线，判定为 baseline 是正确的（不是「变化」）
@@ -134,7 +186,12 @@ try {
     }
   }
 
-  // 第二次运行（有基线、上游未变）必须判定为 no-signal：否则每次巡检都会产生假告警。
+  // 第二次运行（有基线、上游未变）必须判定为 noise：否则每次巡检都会产生假告警。
+  //
+  // 这里覆盖的是一个**实际发生过**的缺陷：原实现把 CHANGELOG 固定截取开头 40 行、
+  // 且安全判定不检查「上游是否真的动了」，于是上游停更时 verdict 恒为 security-fix。
+  // 夹具的 CHANGELOG 里**故意保留**一条含「凭据/密钥」的历史修复，
+  // 用来把「上游没动就不该报安全告警」这条规则钉死（否则用例会恒绿）。
   const r2 = spawnSync('node', ['scripts/report-upstream.mjs'], {
     encoding: 'utf8',
     env: {

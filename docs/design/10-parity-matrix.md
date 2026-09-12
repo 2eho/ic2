@@ -232,7 +232,7 @@
 | 9.2 | Codex app-server JSON-RPC 桥（thread/turn/item、审批、reasoning、plan、usage） | `codex-client.ts` 900 行 | `canvas-agent/src/normalize.js` | 事件归一化到 Item，未知类型保留而非丢弃 | done |
 | 9.3 | Claude Code CLI 桥（stream-json） | `agent/claude.ts` | `canvas-agent/src/normalize.js` | 四类 content block 归一化，多 block 事件拆多 Item | done |
 | 9.4 | 会话/消息模型（threadId + turnId + itemId 三元归属，快照权威） | `message-metadata.ts` + `codex-history.ts` | `agent_items(turn_id,item_id)` 唯一键 | 断线重连不重不丢 | done |
-| 9.5 | 28 个画布工具 + 6 个站点/工作台/素材/提示词工具，共 34 个 | `canvas/schemas.ts` `toolNames` | 工具表由 op schema 生成 | 工具名与语义对等 | done |
+| 9.5 | 28 个画布工具 + 6 个站点/工作台/素材/提示词工具，共 34 个 | `canvas/schemas.ts` `toolNames` | 工具表由 op schema 生成 | 工具名与语义对等 | wip |
 | 9.6 | 工具调用转发到网页执行（SSE `tool_call` + POST `/canvas/result`，30s 超时） | `session.ts requestCanvasTool` | 服务端网关 + 浏览器执行器 | Agent 能改画布 | done |
 | 9.7 | 附件 → 画布图片节点（`canvas_create_attachment_nodes`） | `createAttachmentNodes` | 同名工具 + `graph.PlaceNewNodes` | 附件落为真实节点并避让已有区域 | done |
 | 9.8 | 画布快照压缩（content 截断 240 字符） | `compactNode` | `agent.Service.Snapshot` | 上下文可控 | done |
@@ -326,11 +326,12 @@
 | 5.5 AI 超分 | 能力枚举已登记（`internal/provider/capability.go` 的 `CapImageUpscale`），但**执行路径未实现**。未伪造实现——原项目这里也是「暂未实现」占位 | 依赖上游出现可用的上采样接口；在此之前保持显式提示 |
 | 10.9 插件 SDK | 仓库内**不存在** `definePlugin` / JSX runtime / buildPlugin；协议与宿主（`features/plugins/sandbox/*`、`internal/plugin/*`）已具备 | 与插件模板一起发布；类型从协议同源生成，避免镜像漂移 |
 
-### 14.2 已实现但有简化（`wip`，共 2 项）
+### 14.2 已实现但有简化（`wip`，共 3 项）
 
 | 条目 | 简化点 | 补齐计划 |
 | --- | --- | --- |
 | 2.11 助手会话随画布保存 | 会话已在服务端与 `canvasId` 绑定（刷新后仍在），但「随画布**导出**」未做——`/export` 不含会话快照 | 导出时附带只读会话快照（不导出工具调用参数里的敏感字段） |
+| 9.5 Agent 工具面对等 | 上游 34 个工具（28 画布 + 6 站点/工作台/素材/提示词），本仓只有 14 个（10 画布 + `assets.search`/`prompts.search`/`runs.*`/`skills.*`）。**缺**：`workbench_image_generate`/`workbench_video_generate`/`workbench_*_get_config`、`canvas_list_projects`、`site_navigate`、`assets_list`、`assets_add`、`generation_get_status`、`canvas_move_nodes`/`canvas_resize_node`/`canvas_select_nodes`/`canvas_set_viewport`/`canvas_update_node`/`canvas_update_node_text`/`canvas_connect_nodes`/`canvas_delete_nodes`/`canvas_create_node`/`canvas_create_text_nodes`/`canvas_create_config_node`/`canvas_create_image_prompt_flow`/`canvas_generate_*`（画布改动类在服务端由 `canvas.apply_ops` 一次覆盖，语义等价但**工具名不对等**，MCP 客户端按名调用会 miss） | 按上游 `toolNames` 逐个补：工作台与站点类为独立实现，画布类做成 `canvas.apply_ops` 的语义化薄封装（保持 op 校验唯一路径） |
 | 11.3 导出画布 zip | `/export` 已返回真实的 `ic-canvas-export` JSON；**前端 zip 打包（projects.json + files/）未接**，因此「往返一致」尚无证据 | 前端专项：复用 `shared/zip`（已在素材库互操作中验证过） |
 
 ### 14.3 明确不做（`dropped`，共 3 项）
@@ -347,13 +348,18 @@
 
 | 里程碑 | 门槛 | 当前 |
 | --- | --- | --- |
-| M5 末端 | 85% | ✅ 93.63% |
-| M6 末端 | 95% | ❌ 差 1.37 个百分点 |
-| M7 发版 | 100%（剩余显式 dropped） | ❌ 尚有 8 todo + 2 wip |
+| M5 末端 | 85% | ✅ 92.99% |
+| M6 末端 | 95% | ❌ 差 1.71 个百分点 |
+| M7 发版 | 100%（剩余显式 dropped） | ❌ 尚有 8 todo + 3 wip |
 
-**结论：当前处于「M5 已过、M6 未完」** —— 差距来自 §14.1 的 8 项，其中 4 项是
-同一批（4.12/4.14/4.19 的脚本沙箱 + 4.21 的兼容开关），2 项是前端专项（1.1/3.7），
-1 项是服务端编排（5.1），1 项依赖上游能力（5.5）。
+**结论：当前处于「M5 已过、M6 未完」** —— 差距来自 §14.1 的 8 项与 §14.2 的 3 项，
+其中 4 项是同一批（4.12/4.14/4.19 的脚本沙箱 + 4.21 的兼容开关），2 项是前端专项
+（1.1/3.7），1 项是服务端编排（5.1），1 项依赖上游能力（5.5），
+1 项（9.5）是**上游契约面对照后发现的过度声明**（见下）。
+
+> 9.5 的修正来源：`docs/upstream/sync-log.md` 的契约面对照发现上游 34 个工具 /
+> 本仓 14 个，而矩阵此前标 `done`。这是「覆盖率靠自我评价」的典型形态——
+> **只有把上游契约面拉出来逐项比对，才会发现这种「看起来对等」的假完成**。
 
 ### 14.5 本轮（R8–R10）修掉的「假完成」
 

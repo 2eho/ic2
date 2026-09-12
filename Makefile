@@ -83,7 +83,11 @@ fmt: deps-web-check ## 格式化
 
 .PHONY: fmt-check
 fmt-check: ## 校验格式（CI 门禁）
-	@out=$$(gofmt -l . ); \
+	# `gofmt -l .` 会连**不入库的本地目录**一起扫：`.toolchain/`（本地 Go 工具链与
+	# module cache，见 .gitignore）里的第三方源码格式与本仓无关，却会让门禁恒红。
+	# 这里的排除列表必须与 .gitignore 的不入库目录一致——
+	# 「扫描范围」与「版本控制范围」不一致是这类假红/假绿的共同来源。
+	@out=$$(gofmt -l . | grep -vE '^(\./\.toolchain/|\.toolchain/|\./\.git/|upstream/|\./upstream/|research/|\./research/|web/node_modules/|\./web/node_modules/)' ); \
 	if [ -n "$$out" ]; then echo "以下文件未格式化（请执行 make fmt）："; echo "$$out"; exit 1; fi; \
 	echo "gofmt 通过"
 

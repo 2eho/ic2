@@ -225,13 +225,36 @@ CI 产出 change-report
 
 ## 7. 落地检查单
 
-- [ ] `LICENSE` + `NOTICE` 就位，README 有致谢区块
-- [ ] `.gitignore` 覆盖 `upstream/`、原项目构建产物
-- [ ] 仓库内不存在原项目源码（`rg -l "basketikun" --glob '!docs/**' --glob '!LICENSE' --glob '!NOTICE'` 无业务命中）
-- [ ] `.cnb.yml` 有 `upstream-watch` 定时任务
-- [ ] `scripts/upstream-sync.sh` + `scripts/report-upstream.mjs` 可独立运行
-- [ ] `docs/upstream/sync-log.md` 有首次分析记录
-- [ ] `docs/upstream/divergences.md` 已建立（含 DIV-01..DIV-10）
-- [ ] 导入器有 e2e：玩具旧数据 → 导入 → 断言与预期一致
-- [ ] 品牌/logo/文档域/统计脚本已替换，无残留外链
-- [ ] 「原项目界面标识是否保留」已向用户确认
+状态口径：`[x]` 已由脚本或测试强制（**不是靠人工确认**）；`[ ]` 未完成或需用户确认。
+「由脚本强制」的项在下方列出对应的门禁，避免这条检查单再次退化成「写在那里没人执行」。
+
+### 7.1 剥离与署名
+
+- [x] `LICENSE` + `NOTICE` 就位，README 有致谢区块
+      —— `scripts/check-secrets.mjs` + `make sec`
+- [x] `.gitignore` 覆盖 `upstream/`、`research/`、原项目构建产物
+- [x] 仓库内不存在原项目源码：`web/`、`canvas-agent/` 均为独立实现，
+      **无任何与上游逐字节相同的文件**；无 Go 迁移历史（上游从未是 Go 项目）
+      —— `make sec`（`check-secrets.mjs` 的上游源码命中检查）
+- [x] 品牌/logo/文档域/统计脚本：无 `canvas.best` 域、无 GA4/百度统计注入、
+      无赞助商与社群外链。`basketikun`/`infinite-canvas` 仅出现在
+      致谢（`LICENSE`/`NOTICE`/`README`）、巡检脚本与**旧数据导入兼容**三处
+      —— `make sec`
+- [ ] 「原项目界面标识是否保留」已向用户确认（默认方案：自有品牌 + 致谢页）
+
+### 7.2 上游同步机制
+
+- [x] `.cnb.yml` 有 `upstream-watch` 定时任务（周一 03:00 UTC）+ 手动触发入口
+- [x] `scripts/upstream-sync.sh` + `scripts/report-upstream.mjs` 可独立运行
+      —— `make upstream-radar`（离线夹具自检）
+- [x] `docs/upstream/sync-log.md` 有首次分析记录（v0.18.0 基线 + 契约面对照）
+- [x] `docs/upstream/divergences.md` 已建立（含 DIV-01..DIV-10，与本文 §5 双向校验）
+- [x] 巡检判定不产生假告警：上游未变化时 `verdict=noise`
+      —— `make upstream-radar`（回归用例覆盖「CHANGELOG 截取范围」与
+      「安全判定需上游真的动了」两个曾真实存在的误报）
+
+### 7.3 数据与验收
+
+- [x] 导入器有 e2e：玩具旧数据 → 导入 → 断言与预期一致
+- [ ] 契约面对照的未处理项清零：见 `docs/upstream/sync-log.md` 的「待处理」
+      （当前 9.5 Agent 工具面 34 → 14 的缺口已改回 `wip` 并排期）

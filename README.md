@@ -85,12 +85,19 @@ scripts/                CI 校验脚本
 make check    # lint + test + boundaries + parity + sec + drill
 ```
 
-当前对等矩阵覆盖率 **74.05%**。未完成项在
-[`docs/design/10-parity-matrix.md`](docs/design/10-parity-matrix.md) §14 逐条列出原因。
+当前对等矩阵覆盖率 **92.99%**（146 done / 3 wip / 8 todo / 3 dropped）。未完成项在
+[`docs/design/10-parity-matrix.md`](docs/design/10-parity-matrix.md) §14 逐条列出原因——
+数字下降不代表回退：本轮按上游契约面对照，把 9.5「Agent 工具面对等」从自评的
+`done` 改回 `wip`（上游 34 个工具 / 本仓 14 个）。
 
-核验不是走过场：本轮迭代中被测试捕获并修复的真实缺陷有 10 个
+上游同步记录与有意偏离清单见
+[`docs/upstream/`](docs/upstream/)（`sync-log.md` / `divergences.md`）。
+
+核验不是走过场：被测试捕获并修复的真实缺陷已累计 13 个
 （含缩放参数形状错位、撤销合并粒度过粗、软删资产导致破图、
-GC 误删跨工作区共享 Blob、sqlite 连接池自锁、typed-nil 导致 500 等），
+GC 误删跨工作区共享 Blob、sqlite 连接池自锁、typed-nil 导致 500，
+以及上游同步链路上的 3 个——巡检恒报安全告警、`.gitignore` 让发布物被静默忽略、
+「上游是否改 Go」无法被事实核对），
 清单见 [`docs/guides/verification.md`](docs/guides/verification.md) 末节。
 
 ## 许可与致谢
