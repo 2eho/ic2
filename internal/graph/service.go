@@ -119,17 +119,23 @@ func (s *Service) AppendOps(ctx context.Context, canvasID string, baseVersion in
 	now := s.clock.Now()
 
 	// 版本一致：直接应用。不一致：尝试 rebase（可交换的 op 集合）。
+	//
+	// baseVersion 必须是**客户端读到文档时的版本号**，不允许用 0 表示「随便」。
+	// 旧实现把 0 当成「以服务端当前版本为准」，带来一个真实的静默丢数据缺陷：
+	// 客户端在版本 5 读到文档、版本 6 时提交，若它传 0（或漏传），服务端会
+	// 悄悄把 base 改成 6 并直接应用——本应触发的冲突检测被跳过，用户看不到
+	// 任何提示就覆盖了别人的改动（ATK-11 实测：期望 409，实得 200）。
+	//
+	// 建画布时文档版本就是 0，因此「首次写入」天然合法；任何在 0 之后提交的
+	// 客户端都必然持有非零版本号。真正"未知版本"的调用方应显式传 force。
 	base := baseVersion
 	var rebasedKinds []OpKind
-	if base == 0 {
-		base = current.Version
+	if base < 0 || base > current.Version {
+		return ApplyResult{}, nil, platform.NewError(409, CodeConflict,
+			"base version is ahead of server version").
+			WithDetail("baseVersion", base).WithDetail("serverVersion", current.Version)
 	}
 	if base != current.Version {
-		if base > current.Version {
-			return ApplyResult{}, nil, platform.NewError(409, CodeConflict,
-				"base version is ahead of server version").
-				WithDetail("baseVersion", base).WithDetail("serverVersion", current.Version)
-		}
 		missing, lerr := s.store.ListOpsSinceVersion(ctx, canvasID, base, int(current.Version-base)+16)
 		if lerr != nil {
 			return ApplyResult{}, nil, lerr

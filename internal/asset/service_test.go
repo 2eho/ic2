@@ -277,11 +277,19 @@ func TestKindOfAndMime(t *testing.T) {
 
 func TestNormalizeMimeSniffing(t *testing.T) {
 	png := pngBytes(t, 4, 4)
-	if got := normalizeMIME("", png); got != "image/png" {
+	if got := normalizeMIME("", png, "a.png"); got != "image/png" {
 		t.Fatalf("嗅探失败: %s", got)
 	}
-	if got := normalizeMIME("image/png; charset=binary", png); got != "image/png" {
+	if got := normalizeMIME("image/png; charset=binary", png, "a.png"); got != "image/png" {
 		t.Fatalf("参数未剥离: %s", got)
+	}
+	// 魔数优先于声明：PNG 字节即使被声明成 svg 也必须是 png（ATK-19）
+	if got := normalizeMIME("image/svg+xml", png, "a.svg"); got != "image/png" {
+		t.Fatalf("声明覆盖了内容嗅探: %s", got)
+	}
+	// 无法判定内容时也不接受可执行类型声明（ATK-19）
+	if got := normalizeMIME("text/html", []byte("plain words"), "a.txt"); got == "text/html" {
+		t.Fatalf("无法判定内容时采信了可执行声明: %s", got)
 	}
 }
 

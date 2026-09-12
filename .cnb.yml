@@ -30,6 +30,7 @@
   - name: 静态检查与架构约束
     script: |
       set -euo pipefail
+      # lint 内含 check-no-silent-skip.mjs（禁止「跳过/兜底」把失败变绿）
       make lint
 
   - name: 单元测试与对抗用例
@@ -80,9 +81,21 @@
   - name: 生产构建与性能预算
     script: |
       set -euo pipefail
+      # 门禁需要的是**生产产物**（E2E_MOUNT 关闭），确保「e2e 专用入口不进生产」
       cd web && npm run build
       # 产物体积按 gzip 衡量（首屏体积是「打开画布 < 1.5s」的最强相关因子）
       make perf
+      # 前端产物构建后，用带挂载点的版本构建 e2e 产物，供端到端加载真实实现
+      make e2e-build
+
+  - name: 端到端（真实服务端）
+    script: |
+      set -euo pipefail
+      # 起真实服务端进程 + 同源托管的产物，再跑 Playwright。
+      # `make e2e` 内部会先跑 check-no-silent-skip.mjs：
+      # 「拿不到后端就自动跳过」这种假绿通道在本轮被全部堵掉。
+      npx --yes playwright install --with-deps chromium
+      make e2e
 
 main:
   # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）。

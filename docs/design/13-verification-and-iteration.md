@@ -69,7 +69,7 @@
 | Go 集成 | `testcontainers` | DB + Redis + MinIO 真实依赖 | 关键路径全覆盖 |
 | 前端单测 | `vitest` | kernel 几何/命中/状态机、图像工具纯函数、schema 表单 | kernel 90% |
 | 前端组件 | `vitest` + Testing Library | 关键面板（GenerationPanel / RunPanel / ApprovalCard） | 主要交互 |
-| e2e | `playwright` | 建画布→连线→运行→结果→Agent 操作→导入旧数据 | 20 条主链路 |
+| e2e | `playwright` | 建画布→连线→运行→结果→Agent 操作→导入旧数据 | 20 条主链路（当前 15 条，明细见 §6） |
 | 对抗 | 见 §3.2 | ATK-01..22 | 100% 必过 |
 | 性能 | k6 / 自研 | SSE 并发、5000 节点、大资产 | 见 §3.3 |
 
@@ -82,6 +82,11 @@
 - 新功能 PR 必须至少新增 1 条对抗用例（PR 模板必填）。
 - 修复线上缺陷时，先写失败用例，再修代码（禁止「先修后补」）。
 - 对抗用例跑在「故意制造极端输入」的分支，不允许 mock 掉被测逻辑。
+- **用例必须能失败**：改回缺陷实现后用例要变红。写完用例应实测这一点
+  （本轮四个用例在修复前都是结构性必红/必绿，靠实测才发现）。
+- 对抗用例跑在**真实依赖**上：冲突/离线类用例必须打在真实服务端进程上，
+  不能用内存替身——本轮「SQLite 时间列扫描」与「baseVersion 语义」两个缺陷
+  恰恰只在 SQL 路径上存在，内存替身跑一万遍也不会红。
 
 ### 3.3 性能预算（CI 门禁，超预算即失败）
 
@@ -98,6 +103,39 @@
 | 内存占用 | <500MB | 5000 节点画布，含 20 张大图 |
 
 ### 3.4 静态门禁
+
+### 3.5 假绿通道（本轮新增的门禁）
+
+「没跑」必须表现为失败，不能表现为通过。以下四类形态在 CI 里都曾经把红变绿：
+
+| 形态 | 后果 | 门禁 |
+| --- | --- | --- |
+| e2e 拿不到后端 → `test.skip` | 9 条对抗用例空转，CI 全绿 | `check-no-silent-skip.mjs`（e2e 禁止无条件 skip） |
+| e2e 引入不存在的模块 → 永久 skip | ATK-18/19 从未真正执行 | 同上 + 挂载点就绪断言 |
+| `cmd \|\| echo 跳过` | 工具缺失被当成检查通过 | 同上（Makefile 层）+ `preflight` 显式失败 |
+| CI 里 `make <gate> \|\| true` | 门禁失败被吞 | 同上（`.cnb.yml` 层，白名单逐条列） |
+
+配套纪律：
+- 条件跳过必须写 `ALLOW-CONDITIONAL-SKIP: <理由>`，理由要说明**什么条件下才该跳**；
+- 白名单必须是**精确匹配的整行**，不能用「注释里出现了某个词」这类模糊判断——
+  实测过，模糊判断会让 `make parity || true` 因为附近恰好有「上游巡检」的注释而被放行。
+
+### 3.6 工具链可用性（本轮新增）
+
+工具在不在必须被**探测**，不能被假设。自托管 Runner 与托管 Runner 的工具集不同，
+假设会导致「本地绿、CI 红」，或更糟的「CI 绿、其实没跑」。
+
+- `scripts/toolchain-probe.mjs`：逐项探测并给出安装方式；必需项缺失即失败。
+  工具解析顺序是「显式候选目录 → PATH」，`prettier` 显式从 `web/node_modules/.bin`
+  解析——否则 CI 的 `gen-check` 步骤永远找不到它（该步骤不会注入该目录）。
+- `scripts/doctor.mjs`：环境体检（工具链 / 契约生成物 / Go 可构建 / 依赖 / 可写性）。
+
+两个已修复的具体问题：
+1. Node 的 `spawnSync('gofmt', ...)` **不查 PATH**（先按无扩展名查找再补 `.exe`），
+   因此裸名调用必然 ENOENT。旧代码把它降级成「不格式化就写盘」，于是
+   `make gen` 写脏工作区、`gen-check` 永远红。
+2. `prettier` 被 `gen-contracts` 依赖，却从未声明在 `web/package.json` 里，
+   仅靠 `npm exec` 的隐式下载掩盖——CI 里必红。
 
 - `go vet` / `staticcheck` / `govulncheck` 零告警（高危零容忍）。
 - `tsc --noEmit` 零错误；`eslint` 零 error。
@@ -188,20 +226,43 @@
 ## 6. 快速核验命令（意图）
 
 ```bash
-make gen       # 从 contracts 生成 Go DTO 与 TS 客户端，并校验已提交
-make lint      # vet + staticcheck + eslint + tsc
-make test      # 单测 + 契约测试 + 对抗用例
-make itest     # testcontainers 集成测试
-make e2e       # playwright 主链路
-make perf      # 性能预算校验
-make parity    # 对等矩阵覆盖率报告
-make boundaries # 边界常量与文档一致性校验（config/limits.go ↔ docs §2.1）
-make sec       # govulncheck + npm audit + 自定义规则（redact/SSRF/凭据）
-make drill     # 故障演练（本地可跑的子集）
+make doctor         # 环境体检（工具链/依赖/可构建性）
+make toolchain-probe # 工具链逐项探测（自托管 Runner 适配）
+make gen            # 从 contracts 生成 Go DTO 与 TS 客户端，并校验已提交
+make lint           # vet + 架构约束 + 假绿通道检查（check-no-silent-skip）
+make test           # 单测 + 前端单测 + 桥接器单测（含对抗用例）
+make e2e            # 起真实服务端进程 + Playwright 主链路（含 15 条 e2e）
+make perf           # 性能预算校验
+make parity         # 对等矩阵覆盖率报告
+make boundaries     # 边界常量与文档一致性校验（internal/graph/limits.go ↔ docs §2.1）
+make sec            # 脱敏 / SSRF / 插件权限 / 资产隔离 / 上游幂等 / 仓库卫生
+make drill          # 故障演练（本地可跑的子集）
+make upstream-radar # 上游雷达自检（产物齐备 + 探针从离线夹具抽到契约面）
+make check          # 上面除 e2e/perf/tsc 外的全部（CI 用这一个）
+make check-all      # check + tsc + e2e-build + e2e + perf
 ```
+
+**`make e2e` 的形态**：它先 `scripts/e2e-stack.mjs start` 起一个**真实的服务端进程**
+（独立临时数据目录、固定密钥、同源托管构建产物），再打 Playwright，最后自动清理。
+不用 `httptest` 顶替的原因：ATK-10（沙箱）要看真实浏览器与真实 origin 语义，
+ATK-12（离线恢复）要能真的断网，同源托管只有真进程才有。
 
 `make boundaries` 是关键一条：**边界常量只允许有一处真源**（`config/limits.go`），
 文档中的数值由脚本校验，避免「文档写 30 秒、代码是 60 秒」。
+
+## 6b. e2e 清单（当前 15 条）
+
+运行方式：`make e2e`（内部先起真实服务端进程）。用例**不允许**在后端缺失时跳过。
+
+| 文件 | 条数 | 覆盖 |
+| --- | --- | --- |
+| `web/e2e/conflict.spec.ts` | 3 | ATK-11：同字段过期提交 409 + 权威文档；可 rebase 自动合并 + warning；超前版本 409 |
+| `web/e2e/offline.spec.ts` | 3 | ATK-12：离线队列 20 次编辑不丢不重；幂等键；**真实 `setOffline` 断网恢复** |
+| `web/e2e/plugin-sandbox.spec.ts` | 3 | ATK-10：sandbox 读不到宿主 DOM/Cookie/存储；同源下依然隔离；真实协议实现拒绝原型链键 |
+| `web/e2e/svg-sanitize.spec.ts` | 4 | ATK-19：SVG 不得以可执行类型下发 + `nosniff`；浏览器里打开不执行脚本；伪装 MIME 不被嗅探；服务端不采信声明 MIME |
+| `web/e2e/perf.spec.ts` | 2 | ATK-18：5000 节点 ≥55 FPS + 单次操作反馈预算；首屏产物体积 + e2e 专用入口不泄漏到生产 |
+
+其中 1 条（幂等键）在**未配置上游凭据**时显式跳过，并在用例里写明原因与覆盖方式。
 
 ## 7. 与里程碑的对应
 

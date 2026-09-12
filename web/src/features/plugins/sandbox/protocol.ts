@@ -104,7 +104,20 @@ export function parsePluginMessage(raw: unknown): PluginToHost | null {
     case "host:call": {
       if (typeof msg.id !== "string" || typeof msg.method !== "string")
         return null;
-      if (!(msg.method in METHOD_PERMISSION)) return null;
+      // 必须用 own-property 判定，不能用 `in`。
+      //
+      // 真实缺陷（实测）：`"__proto__" in METHOD_PERMISSION` 为 **true**，
+      // `"constructor"` / `"hasOwnProperty"` / `"toString"` 同理——它们都来自
+      // Object.prototype。于是宿主会把 `method: "__proto__"` 当作合法调用放行，
+      // 一路走到 `METHOD_PERMISSION[method]`（拿到 Object.prototype 而非权限串），
+      // 再由 `hasPermission` 判定为「无需权限」。
+      // 结果是插件可以提交**任意未声明的原型链键**并绕过权限检查，
+      // 与白名单语义（INV-6：未声明一律拒绝）直接冲突。
+      //
+      // 两道防线：先要求是自有属性，再要求值是字符串（原型链键拿不到字符串）。
+      if (!Object.prototype.hasOwnProperty.call(METHOD_PERMISSION, msg.method)) return null;
+      const required = METHOD_PERMISSION[msg.method as HostMethod];
+      if (required !== null && typeof required !== "string") return null;
       const params =
         typeof msg.params === "object" && msg.params !== null
           ? (msg.params as Record<string, unknown>)
@@ -139,6 +152,10 @@ export function parsePluginMessage(raw: unknown): PluginToHost | null {
 
 /** 判定方法所需权限；未声明即为越权（宿主必须拒绝并审计）。 */
 export function requiredPermission(method: HostMethod): Permission | null {
+  // 同样必须排除原型链：`METHOD_PERMISSION["__proto__"]` 会返回 Object.prototype，
+  // 而 `?? null` 不会把它变成 null（它非 null/undefined），于是调用方会拿到一个
+  // 对象当权限用。返回 null 的语义是「无需权限」，因此这里绝不能误判。
+  if (!Object.prototype.hasOwnProperty.call(METHOD_PERMISSION, method)) return null;
   return METHOD_PERMISSION[method] ?? null;
 }
 

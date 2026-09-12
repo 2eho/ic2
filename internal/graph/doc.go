@@ -202,11 +202,22 @@ type CanvasDocument struct {
 }
 
 // NewDocument 构造空文档，视口 k=1。
+// Version 从 0 开始，与数据库的 `version` 列一致。
+//
+// 旧实现写死 1，于是出现了「接口返回 0、数据库是 0、但客户端拿到 1」的三方不一致：
+// 第 65-70 行的 Create 返回 `meta.Version = doc.Version`（1），而 SQL 建表时
+// 只插入了 `doc.Version` 的字面值——两边其实是同一个数字，真正的问题是
+// **没有任何合法状态对应版本 0**。后果是客户端永远无法用 0 作为 baseVersion，
+// 而服务端又必须接受「首次写入」这一情形，导致 `baseVersion == 0` 的语义
+// 只能靠特例（曾经是「跟随服务端」）来实现——那正是静默覆盖他人改动的入口
+// （见 ATK-11 回归用例）。
+//
+// 从 0 开始后语义是自洽的：0 = 空文档，与服务端当前版本一致时即为首次写入。
 func NewDocument(id, projectID string) *CanvasDocument {
 	return &CanvasDocument{
 		ID:        id,
 		ProjectID: projectID,
-		Version:   1,
+		Version:   0,
 		Viewport:  Viewport{X: 0, Y: 0, K: 1},
 		Settings:  DefaultSettings(),
 		Nodes:     map[string]Node{},

@@ -19,6 +19,8 @@
 | INV-4 | 任一 `asset_refs` 记录被删除后，其指向的 Blob 在保留窗口内仍可读 |
 | INV-5 | 凭据明文**永不**出现在任何 HTTP 响应、日志、错误信息、前端内存 |
 | INV-6 | 插件代码**永不**获得宿主 origin 的 DOM/Cookie/localStorage 访问权 |
+| INV-5b | 用户上传的资产被导航访问时，**永不**在应用 origin 下作为可执行文档运行（SVG/HTML/XML 一律降级为不可执行类型 + `nosniff`） |
+| INV-6b | 插件可调用的方法名必须是**自有属性**：`__proto__` / `constructor` 等原型链键一律拒绝（`in` 判定会误放行） |
 | INV-7 | `agent_items(turn_id, item_id)` 唯一；实时事件与历史快照合并后不重复、不丢失 |
 | INV-8 | 任一写操作的 `actor_id` 可追溯，且不等于「无法归属」 |
 | INV-9 | 金额/成本用整数微元表示，聚合后与逐项求和不产生浮点误差 |
@@ -178,8 +180,8 @@
 | ATK-07 | viewer 提交 op | 403（editor 可写，证明是按角色而非一律拒绝） | `internal/api/adversary_test.go` |
 | ATK-08 | 用他人 workspace 的 canvasId 读取 | 404（不泄露存在性） | `internal/api/adversary_test.go` |
 | ATK-09 | 插件调用未声明能力 `asset.read` | 拒绝并审计 | `internal/plugin/manifest_test.go` |
-| ATK-10 | 插件尝试 `parent.document.cookie` | 抛异常（null origin） | `web/e2e/plugin-sandbox.spec.ts` |
-| ATK-11 | 两客户端同时改同一节点 spec | 一方 409 并拿到权威文档 | `web/e2e/conflict.spec.ts` |
+| ATK-10 | 插件尝试 `parent.document.cookie`；以及提交未声明（含原型链键）的方法名 | 抛异常（null origin）；未声明方法一律拒绝 | `web/e2e/plugin-sandbox.spec.ts`, `web/src/features/plugins/sandbox/__tests__/protocol.test.ts` |
+| ATK-11 | 两客户端同时改同一节点 spec | 一方 409 并拿到权威文档；`baseVersion` 不可是「随便」语义（SQL 存储下也必须成立） | `web/e2e/conflict.spec.ts`, `internal/graph/sqlstore_rebase_test.go`, `internal/graph/replay_test.go` |
 | ATK-12 | 断网 30s 内编辑 20 个节点后恢复 | 无丢无重，最终一致 | `web/e2e/offline.spec.ts` |
 | ATK-13 | Agent 实时事件 + 历史快照同时到达 | `agent_items` 无重复 | `internal/agent/agent_test.go` |
 | ATK-14 | 重放同 `callId` 的工具调用 | 只执行一次 | `internal/agent/agent_test.go` |
@@ -187,7 +189,7 @@
 | ATK-16 | GC 运行期间上传被引用的新资产 | 资产未被删 | `internal/asset/service_test.go` |
 | ATK-17 | 日限额边界：跨时区跨日（含 DST 切换日） | 窗口按工作区时区取本地零点，不重复不跳过 | `internal/exec/quota_test.go` |
 | ATK-18 | 5000 节点视口操作 | ≥55 FPS | `web/e2e/perf.spec.ts` |
-| ATK-19 | 恶意 SVG 节点 | `<script>` 不执行 | `web/e2e/svg-sanitize.spec.ts` |
+| ATK-19 | 恶意 SVG 节点 | `<script>` 不执行；且不得以可执行类型下发（`internal/platform` 的单测 + e2e 双覆盖） | `web/e2e/svg-sanitize.spec.ts`, `internal/platform/contenttype_test.go` |
 | ATK-20 | 1MB 提示词 | 422，且**不创建 Run、不产生上游调用** | `internal/api/adversary_test.go` |
 | ATK-21 | 画布 op 日志重放与快照比对 | 完全一致（INV-1） | `internal/graph/replay_test.go` |
 | ATK-22 | 删除工作区后用旧 ID 访问 | 立即 404；7 天冷静期后可恢复；到期进入清理候选 | `internal/identity/delete_test.go` |

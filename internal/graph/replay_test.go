@@ -3,8 +3,11 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/context-flow/ic/internal/platform"
 )
 
 // ATK-21：画布 op 日志重放与快照比对，必须完全一致（INV-1）。
@@ -132,6 +135,74 @@ func TestVersionConflictDetected(t *testing.T) {
 		t.Fatal("同一字段并发修改应返回 409")
 	}
 	_ = cur
+}
+
+// ATK-11 回归：baseVersion=0 不得被解释成「以服务端当前版本为准」。
+//
+// 真实缺陷：旧实现 `if base == 0 { base = current.Version }`，于是任何漏传
+// baseVersion 的客户端都会**跳过冲突检测**并静默覆盖他人改动。
+// 实测表现：客户端在版本 1 用 baseVersion=0 提交，期望 409，实得 200。
+func TestATK11ZeroBaseVersionIsNotABypass(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil, &fixedClock{t: time.Unix(1700000000, 0).UTC()}, nil)
+	ctx := context.Background()
+	meta, _ := svc.Create(ctx, "pj_1", "c")
+
+	// 客户端 A 在版本 0（刚建）提交 → 合法，版本推进到 1
+	if _, _, err := svc.AppendOps(ctx, meta.ID, 0, []json.RawMessage{addPromptOp(t, "p_1", 0, 0)}, "u_a"); err != nil {
+		t.Fatalf("版本 0 的首次写入应被接受: %v", err)
+	}
+
+	// 客户端 B 仍以为自己处于版本 0（漏传 / 传 0），提交对**同一节点同一字段**的
+	// 修改 → 必须 409，而不是静默覆盖 A 的改动。
+	//
+	// 用同一节点同一字段是为了让冲突**不可自动 rebase**：若换成新建另一个节点，
+	// 按设计（docs/design/03 §2.1 策略 1）是允许 rebase 的，那就测不到本缺陷。
+	// 旧实现会把 base 悄悄改成服务端当前版本 → 跳过比对 → 直接应用 → 返回 200。
+	_, _, err := svc.AppendOps(ctx, meta.ID, 0, []json.RawMessage{
+		mustJSON(t, map[string]any{"kind": "set_spec", "id": "p_1", "patch": map[string]any{"text": "overwritten-by-stale-client"}}),
+	}, "u_b")
+	if err == nil {
+		t.Fatal("baseVersion=0 在版本已推进后必须冲突（否则等于静默覆盖他人改动）")
+	}
+	var pe *platform.DomainError
+	if !errors.As(err, &pe) || pe.Status != 409 {
+		t.Fatalf("期望 409 conflict，实际: %v", err)
+	}
+
+	// 且 A 的改动必须原样保留（「返回 409」与「没写进去」必须同时成立）
+	doc, _ := svc.Get(ctx, meta.ID)
+	node, ok := doc.Nodes["p_1"]
+	if !ok {
+		t.Fatal("A 的节点消失了")
+	}
+	if got := node.Spec["text"]; got == "overwritten-by-stale-client" {
+		t.Fatalf("过期客户端的写入被静默应用（值是 %v）", got)
+	}
+
+	// 另一侧：baseVersion 正确时同一字段的修改仍应被允许（不能把冲突检查做成恒拒）
+	cur, _ := svc.Get(ctx, meta.ID)
+	if _, _, err := svc.AppendOps(ctx, meta.ID, cur.Version, []json.RawMessage{
+		mustJSON(t, map[string]any{"kind": "set_spec", "id": "p_1", "patch": map[string]any{"text": "legit-update"}}),
+	}, "u_c"); err != nil {
+		t.Fatalf("持有正确版本的写入不应被拒: %v", err)
+	}
+}
+
+// baseVersion 超前于服务端（时钟/状态错乱）必须冲突，不能盲目应用。
+func TestATK11FutureBaseVersionConflicts(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil, &fixedClock{t: time.Unix(1700000000, 0).UTC()}, nil)
+	ctx := context.Background()
+	meta, _ := svc.Create(ctx, "pj_1", "c")
+	_, _, err := svc.AppendOps(ctx, meta.ID, 99, []json.RawMessage{addPromptOp(t, "p_1", 0, 0)}, "u_a")
+	if err == nil {
+		t.Fatal("baseVersion 超前必须冲突")
+	}
+	var pe *platform.DomainError
+	if !errors.As(err, &pe) || pe.Status != 409 {
+		t.Fatalf("期望 409，实际: %v", err)
+	}
 }
 
 func TestRebaseableAllowsDisjointMoves(t *testing.T) {

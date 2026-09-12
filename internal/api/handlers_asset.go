@@ -67,7 +67,26 @@ func (h *handlers) getAssetRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close()
-	w.Header().Set("Content-Type", mime)
+
+	// ATK-19：资产是**不可信内容**，绝不能在应用 origin 下被当成可执行文档。
+	//
+	// 两件事缺一不可：
+	//   1. nosniff —— 否则浏览器会把兜底类型（text/plain）嗅探成 HTML 并执行脚本；
+	//   2. 类型降级 —— SVG/HTML/XML 一律以 text/plain 下发，内容仍可查看/下载，
+	//      但不会被解析成文档（实测过：不降级时上传的 SVG 里的 <script> 会真的执行）。
+	//
+	// 注意这里**不**依赖存储时判定，而是下发时再判一次：
+	// 历史数据（修复前入库的 image/svg+xml 记录）也必须被覆盖，否则修了代码
+	// 却留着已有的可执行资产——那等于只修了「新的攻击」。
+	safe := platform.SafeContentType(mime)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", safe)
+	if safe != mime {
+		// 与 nosniff 配套：明确告诉浏览器按附件处理，不要内联渲染。
+		// 只降级类型而不加 attachment 时，某些浏览器仍会对 text/plain 尝试内联；
+		// 内联本身无害（不执行），但会让人以为「SVG 正常显示了」，从而误判安全状态。
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	}
 	w.Header().Set("ETag", `"`+r.PathValue("aid")+`"`)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Accept-Ranges", "bytes")
@@ -93,7 +112,10 @@ func (h *handlers) getAssetThumb(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", mime)
+	// 缩略图理论上是我们自己生成的 png，但仍显式标注 nosniff：
+	// 缩略图路径曾经直接透传来源 mime，一旦回归就会重新打开同一条攻击面。
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", platform.SafeContentType(mime))
 	w.Header().Set("Cache-Control", "public, max-age=604800")
 	_, _ = w.Write(data)
 }

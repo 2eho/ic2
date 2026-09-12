@@ -17,6 +17,8 @@ web/test-results/
 
 # 本地数据与密钥
 data/
+# e2e 服务端运行状态（pid/端口/临时目录，由 scripts/e2e-stack.mjs 写出）
+.e2e-stack.json
 .env
 .env.local
 *.local

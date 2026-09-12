@@ -66,7 +66,7 @@ func (s *Service) Upload(ctx context.Context, wsID, name, mime string, r io.Read
 	if err != nil {
 		return nil, err
 	}
-	mime = normalizeMIME(mime, buf)
+	mime = normalizeMIME(mime, buf, name)
 	kind := KindOf(mime, name)
 
 	// 内容寻址去重：同工作区同 hash 已有记录则直接复用（ATK-16 前提）。
@@ -335,23 +335,24 @@ func ExtractMeta(buf []byte, mime string) map[string]any {
 	return meta
 }
 
-func normalizeMIME(mime string, buf []byte) string {
-	mime = strings.TrimSpace(strings.Split(mime, ";")[0])
-	if mime != "" && mime != "application/octet-stream" {
-		return mime
+// normalizeMIME 判定资产的真实类型。
+//
+// 判定原则（ATK-19）：**不采信客户端声明**。
+// 旧实现的写法是「声明不是 octet-stream 就直接返回声明」，于是上传者只要把
+// Content-Type 写成 image/svg+xml，就能让服务端把一段可执行 XML 存成 svg 并在
+// 同源下原样下发——可执行类型的选择权完全交给了上传者。
+//
+// 现在的顺序：字节嗅探 → 文本标记语言按扩展名+内容双重确认 → 声明兜底 → octet-stream。
+// 声明只在「嗅探得不出结论」时作为弱依据使用，且不会用来判定可执行类型。
+func normalizeMIME(mime string, buf []byte, name string) string {
+	declared := strings.TrimSpace(strings.Split(mime, ";")[0])
+	if byContent := platform.SniffContentType(buf, declared, name); byContent != "" {
+		return byContent
 	}
-	// 嗅探兜底：以字节前缀判断（不信任客户端声明）
-	switch {
-	case bytes.HasPrefix(buf, []byte("\x89PNG\r\n\x1a\n")):
-		return "image/png"
-	case bytes.HasPrefix(buf, []byte("\xff\xd8\xff")):
-		return "image/jpeg"
-	case bytes.HasPrefix(buf, []byte("GIF87a")), bytes.HasPrefix(buf, []byte("GIF89a")):
-		return "image/gif"
-	case len(buf) > 12 && bytes.Equal(buf[0:4], []byte("RIFF")) && bytes.Equal(buf[8:12], []byte("WEBP")):
-		return "image/webp"
-	case bytes.HasPrefix(buf, []byte("%PDF")):
-		return "application/pdf"
+	// 嗅探无结论：才退回到声明，且必须剔除可执行类型——
+	// 无法判定内容的资产，不允许被贴上「浏览器会执行它」的类型。
+	if declared != "" && declared != "application/octet-stream" && !platform.IsExecutableType(declared) {
+		return declared
 	}
 	return "application/octet-stream"
 }

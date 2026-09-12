@@ -31,16 +31,16 @@
 
 | # | 功能 | 原实现 | 重写落位 | 验收 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 1.1 | 首页（介绍 + 提示词展示墙 + 入口） | `pages/home/index.tsx` 120 行 | `features/home` | 首页可打开，展示提示词封面墙并可预览大图 | todo |
+| 1.1 | 首页（介绍 + 提示词展示墙 + 入口） | `pages/home/index.tsx` 120 行 | `features/home/HomePage.tsx` | 首页可打开，展示版本信息、入口卡片与提示词封面墙 | done |
 | 1.2 | 我的画布（项目卡片列表） | `pages/canvas/index.tsx` 130 行 | `features/canvas/ProjectList` | 新建/重命名/复制/删除/导入/导出 | done |
 | 1.3 | 画布编辑器 | `pages/canvas/project.tsx` 3384 行 | `features/canvas/*` 拆 20+ 模块 | 见第 3 节 | done |
-| 1.4 | 生图工作台 | `pages/image/index.tsx` 903 行 | `features/workbench/Image` | 见第 6 节 | todo |
-| 1.5 | 视频创作台 | `pages/video/index.tsx` 801 行 | `features/workbench/Video` | 见第 6 节 | todo |
+| 1.4 | 生图工作台 | `pages/image/index.tsx` 903 行 | `features/workbench/WorkbenchPage`（mode=image） | 见第 6 节（6.1–6.7 全部 done） | done |
+| 1.5 | 视频创作台 | `pages/video/index.tsx` 801 行 | `features/workbench/WorkbenchPage`（mode=video） | 见第 6 节（6.8–6.12 全部 done） | done |
 | 1.6 | 提示词库 | `pages/prompts/index.tsx` + `components/prompts/*` | `features/prompts` | 分类/标签/搜索/详情/复制/存资产 | done |
 | 1.7 | 我的素材 | `pages/assets/index.tsx` 563 行 | `features/assets` | 见第 7 节 | done |
 | 1.8 | 配置中心 | `pages/config/index.tsx` + `components/layout/app-config-modal.tsx` | `features/settings` | 见第 8 节 | done |
 | 1.9 | 顶栏导航 + 移动端抽屉 | `components/layout/app-top-nav.tsx` / `mobile-nav-drawer.tsx` | `app/Shell` | 导航可用，画布页隐藏顶栏 | done |
-| 1.10 | Agent 侧边栏（全局） | `components/agent/agent-panel.tsx` + 12 个子组件 | `features/agent/Sidebar` | 见第 9 节 | todo |
+| 1.10 | Agent 侧边栏（全局） | `components/agent/agent-panel.tsx` + 12 个子组件 | `features/agent/AgentSidebar` + `BridgePanel` + `SkillsPanel` | 见第 9 节（9.11 已覆盖） | done |
 | 1.11 | 404 页 | `pages/not-found` | `app/NotFound` | 任意未知路由展示 404 | done |
 | 1.12 | 快捷键说明弹窗 | `canvas-top-bar.tsx` 内 `Shortcut` | `features/canvas/ShortcutsModal` | 内容与原项目 15 条一致 | done |
 
@@ -58,7 +58,7 @@
 | 2.8 | 视口 x/y/k | `ViewportTransform` | `Viewport` | 打开画布恢复视口 | done |
 | 2.9 | 背景模式 lines/dots/blank | `CanvasBackgroundMode` | `CanvasSettings.Background` | 三种背景可切换 | done |
 | 2.10 | 图片信息开关 `showImageInfo` | project 字段 | `CanvasSettings.ImageInfo` | 开关状态持久化 | done |
-| 2.11 | 助手会话随画布保存 | `chatSessions` / `activeChatId` | `AgentSession`（服务端） | 见 9.4 | todo |
+| 2.11 | 助手会话随画布保存 | `chatSessions` / `activeChatId` | `AgentSession`（服务端，与 canvasId 绑定，见 9.4） | 会话随画布**持久化**已成立；「随画布导出」未做（`/export` 不含会话快照） | wip |
 | 2.12 | 旧数据迁移 | 无（AGENTS.md 声明不兼容） | `legacy/` 转换器 + `POST /canvases/import` | 原用户一键导入历史画布与图片 | done |
 
 ### 2.13 原项目 metadata 字段 → 重写落位映射（逐字段，防漏）
@@ -137,7 +137,7 @@
 | 4.9 | Gemini TTS（`responseModalities:["AUDIO"]` + `speechConfig`） | model-plugin gemini 音频模板 | 同上 | 返回 base64 PCM 可播放 | done |
 | 4.10 | 模型列表拉取（OpenAI `/v1/models`、Gemini `/v1beta/models`） | `fetchImageModels` | `provider` | 拉取后按关键词猜能力 | done |
 | 4.11 | 自定义渠道 + 每模型能力（image/video/text/audio） | `use-config-store.ts` 496 行 | `providers` 表 | 多渠道、按能力选模型 | done |
-| 4.12 | 自定义调用脚本（`new Function` 注入 17 个变量） | `model-plugin.ts` `runModelPlugin` | 服务端沙箱（goja） | 见 4.19 | todo |
+| 4.12 | 自定义调用脚本（`new Function` 注入 17 个变量） | `model-plugin.ts` `runModelPlugin` | 未实现（服务端沙箱待落地） | 见 4.19 | todo |
 | 4.13 | 脚本模板（OpenAI/Gemini × image/video/audio/text 共 8 个） | `getPluginTemplates()` | 同结构模板 | 逐个可运行 | done |
 | 4.14 | 脚本编辑器 UI（三步向导 + 复制写脚本说明 + 插入模板 + 恢复默认） | `scriptEditor` i18n 有大段文案 | `features/settings/ScriptEditor` | 交互一致 | todo |
 | 4.15 | 失败分类与提示（401/403/429/404/502/503、HTML 错误页、超时、取消） | `readStatusError` / `readApiErrorMessage` | `DomainError.Code` + i18n | 错误码稳定枚举 | done |
@@ -159,7 +159,7 @@
 | 5.2 | 裁剪（自由/固定/原图三种比例，缩放拖动） | `canvas-node-crop-dialog.tsx` + `cropDataUrl` | 生成新节点并连线 | done |
 | 5.3 | 切图（行列 + 自定义横竖切线 + 撤销重做） | `canvas-node-split-dialog.tsx` 299 行 + `splitDataUrl` | 按原网格排列到右侧 | done |
 | 5.4 | 放大（目标边长 ≤4096，最近邻/双线性/高清插值） | `canvas-node-upscale-dialog.tsx` + `upscaleDataUrl` | 三种算法结果可区分 | done |
-| 5.5 | AI 超分 | 原项目**未实现**（弹窗提示「暂未实现」） | 重写实现或保持占位 | todo |
+| 5.5 | AI 超分 | 原项目**未实现**（弹窗提示「暂未实现」） | 能力枚举已登记（`CapImageUpscale`），执行路径未实现 | 明确提示而非伪造结果 | todo |
 | 5.6 | AI 多角度（水平/俯仰/镜头距离/广角 → 生成编辑提示词） | `canvas-node-angle-dialog.tsx` + `buildAnglePrompt` | 文案与角度标签一致 | done |
 | 5.7 | 视频截帧（首帧/尾帧/当前帧 → 图片节点） | `canvas-video-frame.ts` | 生成节点并连线，避让已有节点 | done |
 | 5.8 | 反推提示词（图片 → 文本节点 + 配置节点 + 连线） | `createImageReversePromptNodes` | 三节点布局与提示词文案一致 | done |
@@ -272,7 +272,7 @@
 | --- | --- | --- | --- | --- |
 | 11.1 | i18n 全量（zh-CN / en-US） | 各 657 行，含 canvas/agent/config/imageWorkbench/videoWorkbench/assets/prompts/home 等命名空间 | 无硬编码文案，无缺 key | done |
 | 11.2 | 主题（画布主题与 antd token 统一，禁止组件内写死黑白） | `canvas-theme.ts` + `app-theme.ts` | 亮/暗一致 | done |
-| 11.3 | 导出画布 zip（projects.json + files/，version 3 格式） | `canvas-export.ts` | 导出→导入往返一致 | todo |
+| 11.3 | 导出画布 zip（projects.json + files/，version 3 格式） | `canvas-export.ts` | `/export` 返回真实 JSON（`kind: ic-canvas-export`，见 handlers_graph.go）；**前端 zip 打包未接** | 导出→导入往返一致 | wip |
 | 11.4 | 导出选中节点 zip（媒体原文件 + 文本 txt + 其他 json） | `exportCanvasNodes` | 可用 | done |
 | 11.5 | 复制文本并提示的统一 hook | `use-copy-text.ts` | 统一复用 | done |
 | 11.6 | 文件大小/时长格式化 | `formatBytes` / `formatDuration` | 复用 | done |
@@ -305,30 +305,68 @@
 
 ## 14. 当前未完成项（诚实清单）
 
-覆盖率报告由 `make parity` 生成。以下条目**尚未实现**，逐条给出原因与计划，
+覆盖率报告由 `make parity` 生成。以下条目**尚未实现或仍有简化**，逐条给出原因与计划，
 避免「看起来覆盖率很高」的自欺。
 
-### 已实现但有简化（`wip` 的替代说明）
+> 本节的写法要求：**每条都要能在代码里被证实**。上一版本曾把已经落地的条目留在
+> 「未完成」列表里（例如 1.1/1.4/1.5/1.10、6.x、7.x、9.x 的桥接器与 Skills），
+> 结果这份清单既不能指导排期，也掩盖了真正未做的项。核对方式见 §13。
+
+### 14.1 仍未实现（`todo`，共 8 项）
+
+| 条目 | 未实现的原因 | 补齐计划 |
+| --- | --- | --- |
+| 1.1 首页「可预览大图」 | 首页已展示提示词封面墙与入口，但**点击预览大图**未接（只有卡片） | M-next：点卡片打开与画布同一 `ImageInfo` 视图 |
+| 3.7 从连线末端拖到空白 → 创建节点菜单 | 交互状态机有 `start-connect` 意图，但**落点为空白时弹出创建菜单**未实现 | M-next：在 `commit-connect` 的空白分支追加菜单，创建后自动连线 |
+| 4.12 自定义调用脚本 | **服务端沙箱未落地**：仓库内不存在 goja / 子进程执行路径。原项目的 `new Function` 是安全缺陷，因此宁可缺功能也不能照搬 | 与 4.19 同批；先做能力白名单与超时，再做变量注入面 |
+| 4.14 脚本编辑器 UI | 依赖 4.12 的执行语义；先把「脚本能安全跑」做出来，再做三步向导，否则 UI 是给一个不可用的功能做界面 | 与 4.12 同批 |
+| 4.19 自定义脚本沙箱化 | 同上；这是 4.12/4.14 的前置条件 | 优先于 4.12 |
+| 4.21 本地直连模式 | 保留兼容项，需要**显式开启且默认关闭**并写明风险；当前未实现（服务端统一编排已是默认路径，因此它不是阻塞项） | M-next；文档需明确风险与适用场景 |
+| 5.1 蒙版「生成遮罩标注图作为参考图 2」 | 画笔/擦除/笔刷大小/撤销重做/导出均已可用（`dialogs/generative.tsx`）；缺的是**服务端编排**：把「原图 + 蒙版图」作为双参考输入送 edit | M-next：`exec` 支持双参考输入后接上 |
+| 5.5 AI 超分 | 能力枚举已登记（`internal/provider/capability.go` 的 `CapImageUpscale`），但**执行路径未实现**。未伪造实现——原项目这里也是「暂未实现」占位 | 依赖上游出现可用的上采样接口；在此之前保持显式提示 |
+| 10.9 插件 SDK | 仓库内**不存在** `definePlugin` / JSX runtime / buildPlugin；协议与宿主（`features/plugins/sandbox/*`、`internal/plugin/*`）已具备 | 与插件模板一起发布；类型从协议同源生成，避免镜像漂移 |
+
+### 14.2 已实现但有简化（`wip`，共 2 项）
 
 | 条目 | 简化点 | 补齐计划 |
 | --- | --- | --- |
-| 5.1 蒙版局部编辑 | 画笔/擦除/撤销/导出已实现；「生成遮罩标注图作为参考图 2」的服务端编排未接 | M-next：exec 支持「原图 + 蒙版图」双参考输入 |
-| 5.5 AI 超分 | 明确提示「需要服务端上采样模型」并禁用，未伪造实现 | 依赖新增 provider 能力 `image.upscale` |
-| 6.x 工作台 | 生成与历史已可用；参考图排序/编号角标/移动端抽屉未做 | M-next 前端专项 |
-| 7.2/7.4/7.5 zip 互操作 | 单条资产上传/下载/删除可用；zip 打包与画布互操作未做 | M-next 前端专项 |
-| — | 配置与同步章节已收口：8.11（本地代理）与 8.13（WebDAV）显式 dropped，其余全部 done | 无需排期 |
-| 9.2/9.3/9.7/9.8/9.14/9.15/9.16 | 服务端会话模型与 MCP 已可用；本机 Codex/Claude 桥接、附件转节点、快照压缩、Skills、多标签隔离未做 | 本机桥接器作为独立包发布 |
-| 10.9 插件 SDK | 协议与宿主持有；`definePlugin`/构建脚本未提供 | 与插件模板一起发布 |
-| 1.1/1.4/1.5/1.10 | 首页提示词墙已可用；生图/视频工作台与 Agent 侧边栏有骨架但未完成全部交互 | M-next |
-| 2.11 助手会话随画布保存 | 会话在服务端与画布关联；「随画布导出」未做 | 导出时附带只读会话快照 |
-| 3.7 连线末端拖到空白创建节点 | 未实现 | M-next |
-| 11.3 导出画布 zip | `/export` 返回 JSON；zip 打包由前端完成，未接 | M-next |
+| 2.11 助手会话随画布保存 | 会话已在服务端与 `canvasId` 绑定（刷新后仍在），但「随画布**导出**」未做——`/export` 不含会话快照 | 导出时附带只读会话快照（不导出工具调用参数里的敏感字段） |
+| 11.3 导出画布 zip | `/export` 已返回真实的 `ic-canvas-export` JSON；**前端 zip 打包（projects.json + files/）未接**，因此「往返一致」尚无证据 | 前端专项：复用 `shared/zip`（已在素材库互操作中验证过） |
 
-### 明确不做（`dropped`）
+### 14.3 明确不做（`dropped`，共 3 项）
 
-见 §12。这些不是"还没做"，而是设计上不做，理由已写。
+见 §12。这些不是「还没做」，而是设计上不做，理由已写：
 
-### 与里程碑门槛的对照
+- 4.20 本地代理开关（服务端同源转发后不再需要）
+- 8.11 本地代理页（同上）
+- 8.13 WebDAV 同步（DIV-06 改用服务端权威同步；导出/备份能力保留）
 
-参考 `docs/design/09-roadmap.md` 的覆盖率门槛。当前 74.05% 处在
-「M3 末（65%）与 M4 末（80%）之间」，即核心链路已完成，外围能力在补齐中。
+### 14.4 与里程碑门槛的对照
+
+参考 `docs/design/09-roadmap.md` 门槛表与 `docs/design/13` §2.1：
+
+| 里程碑 | 门槛 | 当前 |
+| --- | --- | --- |
+| M5 末端 | 85% | ✅ 93.63% |
+| M6 末端 | 95% | ❌ 差 1.37 个百分点 |
+| M7 发版 | 100%（剩余显式 dropped） | ❌ 尚有 8 todo + 2 wip |
+
+**结论：当前处于「M5 已过、M6 未完」** —— 差距来自 §14.1 的 8 项，其中 4 项是
+同一批（4.12/4.14/4.19 的脚本沙箱 + 4.21 的兼容开关），2 项是前端专项（1.1/3.7），
+1 项是服务端编排（5.1），1 项依赖上游能力（5.5）。
+
+### 14.5 本轮（R8–R10）修掉的「假完成」
+
+这部分不是功能进度，而是**核验机制本身的缺陷**，因此单列。它们曾经让上面的覆盖率
+数字失去意义：
+
+| 问题 | 表现 | 现在 |
+| --- | --- | --- |
+| `baseVersion: 0` 被当成「跟随服务端当前版本」 | 并发写静默覆盖他人改动（实测 409 → 200） | 语义收紧为「必须等于客户端读到的版本」；`NewDocument` 从 0 起；ATK-11 有回归用例 |
+| `ListOpsSinceVersion` 在 SQLite 上扫描失败 | 冲突自动合并路径**从未工作**（并发提交直接 500） | 时间列按字符串读入再解析；SQL 存储下的 rebase 路径有独立用例 |
+| 上传的 SVG 以 `image/svg+xml` 同源下发、无 `nosniff` | **可实际利用的存储型 XSS**（脚本在应用 origin 执行） | 可执行类型一律降级 + `nosniff` + CSP sandbox；上传不再采信客户端声明的 MIME；ATK-19 有单测 + e2e |
+| 插件协议用 `in` 判方法白名单 | `__proto__` / `constructor` 被当作合法方法放行，权限检查被绕过 | 改为自有属性判定；ATK-10 覆盖原型链键 |
+| e2e 拿不到后端就 skip | 9 条对抗用例长期空转 | 后端缺失即硬失败；`check-no-silent-skip.mjs` 把假绿通道变成门禁 |
+| ATK-18/19 引入不存在的模块 | 两条性能/安全用例永久 skip | 经 `e2e/mount.ts` 挂载真实实现；断言「用例确实跑起来了」 |
+| `prettier` 未声明为依赖 + 裸名调用 `gofmt` | `gen-check` 永远红；写回模式会污染工作区 | 显式依赖 + 绝对路径解析 + 工具缺失显式失败；`check-gen-parser.mjs` 加幂等断言 |
+

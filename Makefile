@@ -27,11 +27,11 @@ help: ## 显示可用目标
 .PHONY: preflight
 preflight: ## 检查必备工具链（缺失即失败，不做静默跳过）
 	@missing=0; \
-	for tool in $(GO) node; do \
+	for tool in $(GO) node gofmt; do \
 	  command -v $$tool >/dev/null 2>&1 || { echo "缺少必备工具：$$tool"; missing=1; }; \
 	done; \
 	[ $$missing -eq 0 ] || { echo "请安装缺失工具后重试（Go 1.24+ / Node 20+）"; exit 1; }; \
-	echo "工具链就绪：$$($(GO) version | cut -d' ' -f3) / node $$(node -v)"
+	echo "工具链就绪：$$($(GO) version | cut -d' ' -f3) / node $$(node -v) / gofmt $$(gofmt -h 2>&1 | head -1 | awk '{print $$2}')"
 
 .PHONY: deps
 deps: ## 安装本地依赖（Go modules + 前端）
@@ -77,9 +77,9 @@ gen-check: ## 只校验生成物已提交（CI 用，不改文件）
 # ---------------------------------------------------------------- 门禁
 
 .PHONY: fmt
-fmt: ## 格式化
+fmt: deps-web-check ## 格式化
 	$(GO) fmt ./...
-	cd web && npm exec -- prettier --write 'src/**/*.{ts,tsx,css}' 2>/dev/null || true
+	cd web && ./node_modules/.bin/prettier --write 'src/**/*.{ts,tsx,css}'
 
 .PHONY: fmt-check
 fmt-check: ## 校验格式（CI 门禁）
@@ -101,6 +101,7 @@ lint: ## 静态检查：vet + 架构约束 + CI 配置 + 前端 tsc
 	node scripts/check-boundaries.mjs
 	node scripts/check-features-boundary.mjs
 	node scripts/check-file-size.mjs
+	node scripts/check-no-silent-skip.mjs
 
 .PHONY: tsc
 tsc: deps-web-check ## 前端类型检查
@@ -140,6 +141,22 @@ parity-enforce: ## 对等矩阵覆盖率强制门禁（发版口径 100%）
 boundaries: ## 边界常量与文档一致（唯一真源 internal/graph/limits.go）
 	node scripts/check-boundaries.mjs
 
+.PHONY: upstream-radar
+upstream-radar: ## 上游雷达自检：产物齐备 + 探针能从离线夹具抽到契约面
+	node scripts/check-upstream-radar.mjs
+
+.PHONY: upstream-watch
+upstream-watch: ## 真巡检上游（需要网络；只产出报告，判定结果写入 upstream/change-report.json）
+	bash scripts/upstream-sync.sh
+
+.PHONY: doctor
+doctor: ## 环境体检（工具链 / 目录可写 / 服务端能否起来），缺失项显式报告
+	node scripts/doctor.mjs
+
+.PHONY: toolchain-probe
+toolchain-probe: ## 探测自托管 Runner 上工具链的真实可用性（不依赖调用方 PATH）
+	node scripts/toolchain-probe.mjs
+
 .PHONY: sec
 sec: ## 安全门禁：凭据脱敏、SSRF、插件权限、资产隔离、依赖漏洞
 	$(GO) test ./internal/platform/ -run 'TestATK04|TestATK06|TestRedact|TestSSRF|TestDrill' -count=1
@@ -168,20 +185,36 @@ agent-check: ## 桥接器静态检查（语法 + 安全约束）
 	@for f in canvas-agent/src/*.js; do node --check "$$f" || exit 1; done
 	@echo "canvas-agent 语法检查通过"
 
+.PHONY: e2e-stack-up
+e2e-stack-up: ## 起一个真实服务端 + 同源托管的构建产物（e2e 前置）
+	node scripts/e2e-stack.mjs start
+
+.PHONY: e2e-stack-down
+e2e-stack-down: ## 停止 e2e 服务端并清理临时数据
+	node scripts/e2e-stack.mjs stop
+
 .PHONY: e2e
-e2e: deps-web-check ## 端到端主链路（Playwright；缺浏览器时给出安装提示）
-	$(GO) test ./internal/api/apitest/ -count=1 -v
-	cd web && npm exec -- playwright test 2>/dev/null || { echo "Playwright 浏览器未安装：cd web && npx playwright install --with-deps chromium"; exit 1; }
+e2e: deps-web-check e2e-stack-up ## 端到端主链路（Playwright 打真实服务端；缺浏览器时显式失败）
+	@set -e; \
+	trap '$(MAKE) --no-print-directory e2e-stack-down >/dev/null 2>&1 || true' EXIT; \
+	node scripts/check-no-silent-skip.mjs; \
+	$(GO) test ./internal/api/apitest/ -count=1; \
+	cd web && npm exec -- playwright test --reporter=list; \
+	echo "e2e 通过（打的是真实服务端进程，不是 httptest）"
+
+.PHONY: e2e-build
+e2e-build: deps-web-check ## 构建 e2e 专用产物（含挂载点，供用例加载真实实现）
+	cd web && E2E_MOUNT=1 npm run build
 
 .PHONY: perf
 perf: deps-web-check ## 性能预算校验（内核 + 视口；见 docs/design/13 §3.3）
 	node scripts/perf-budget.mjs
 
 .PHONY: check
-check: preflight gen-check fmt-check lint test test-agent agent-check adversary boundaries parity sec drill ## 本地全套门禁（CI 用这一个）
+check: preflight gen-check fmt-check lint test test-agent agent-check adversary boundaries parity sec drill upstream-radar ## 本地全套门禁（CI 用这一个）
 
 .PHONY: check-all
-check-all: check tsc e2e perf ## 全套 + 前端类型/端到端/性能
+check-all: check tsc e2e-build e2e perf ## 全套 + 前端类型/端到端/性能
 
 .PHONY: clean
 clean: ## 清理构建产物

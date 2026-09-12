@@ -199,13 +199,10 @@ func (s *SQLStore) ListOps(ctx context.Context, canvasID string, since int64, li
 	defer rows.Close()
 	out := []Record{}
 	for rows.Next() {
-		var r Record
-		var raw string
-		if err := rows.Scan(&r.Seq, &r.ActorID, &raw, &r.Version, &r.CreatedAt); err != nil {
-			return nil, platform.AsError(err)
+		r, err := scanOpRecord(rows, canvasID)
+		if err != nil {
+			return nil, err
 		}
-		r.CanvasID = canvasID
-		r.Op = json.RawMessage(raw)
 		out = append(out, r)
 	}
 	return out, platform.AsError(rows.Err())
@@ -225,13 +222,10 @@ func (s *SQLStore) ListOpsSinceVersion(ctx context.Context, canvasID string, sin
 	defer rows.Close()
 	out := []Record{}
 	for rows.Next() {
-		var r Record
-		var raw string
-		if err := rows.Scan(&r.Seq, &r.ActorID, &raw, &r.Version, &r.CreatedAt); err != nil {
-			return nil, platform.AsError(err)
+		r, err := scanOpRecord(rows, canvasID)
+		if err != nil {
+			return nil, err
 		}
-		r.CanvasID = canvasID
-		r.Op = json.RawMessage(raw)
 		out = append(out, r)
 	}
 	return out, platform.AsError(rows.Err())
@@ -298,4 +292,50 @@ func (s *SQLStore) WorkspaceOf(ctx context.Context, canvasID string) (string, er
 		return "", platform.AsError(err)
 	}
 	return wsID, nil
+}
+
+// scanOpRecord 读取一行 canvas_ops。
+//
+// 为什么需要独立函数：`created_at` 在 SQLite 里是 TEXT（迁移脚本如此定义），
+// 在 Postgres 里是 timestamptz。直接 Scan 到 time.Time 时 SQLite 会报
+// 「unsupported Scan, storing driver.Value type string into type *time.Time」——
+// 而报错发生在**冲突 rebase 路径**上，于是「并发冲突自动合并」这个功能在
+// SQLite（也就是默认自托管形态）下从未真正工作过，只是没人走到那条分支。
+// 因此统一按字符串读入再解析，两种驱动行为一致。
+func scanOpRecord(rows *sql.Rows, canvasID string) (Record, error) {
+	var r Record
+	var raw string
+	var created string
+	if err := rows.Scan(&r.Seq, &r.ActorID, &raw, &r.Version, &created); err != nil {
+		return Record{}, platform.AsError(err)
+	}
+	r.CanvasID = canvasID
+	r.Op = json.RawMessage(raw)
+	r.CreatedAt = parseSQLTime(created)
+	return r, nil
+}
+
+// parseSQLTime 容忍多种时间表示（SQLite TEXT / Postgres timestamptz / 驱动差异）。
+// 无法解析时返回零值而不是报错：时间戳坏了不该让整个画布不可用。
+func parseSQLTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999Z07:00",
+		// Go time.Time 的默认 String() 形态（modernc sqlite 驱动会以它写入）。
+		// 实测写入值是 "2023-11-14 22:13:20 +0000 UTC"，不覆盖这一种就会
+		// 全部落回零值——比直接报错更隐蔽（时间看起来"有"，只是永远不对）。
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }

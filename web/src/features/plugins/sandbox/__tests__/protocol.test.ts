@@ -116,3 +116,49 @@ describe("protocol", () => {
     expect(doc).not.toContain("allow-same-origin");
   });
 });
+
+/**
+ * ATK-10 补充：协议校验必须拒绝**原型链键**。
+ *
+ * 真实缺陷（实测确认）：旧实现用 `msg.method in METHOD_PERMISSION` 判白名单，
+ * 而 `"__proto__" in {}` 为 true（来自 Object.prototype）。于是
+ * `method: "__proto__"` / `"constructor"` / `"hasOwnProperty"` 全部被当成
+ * 合法调用放行，权限判定也退化成「无需权限」——插件可以提交任意未声明的
+ * 原型链键并绕过权限检查，与白名单语义（未声明一律拒绝）冲突。
+ */
+describe('ATK-10 协议校验拒绝原型链键', () => {
+  const call = (method: string) =>
+    parsePluginMessage({ type: 'host:call', id: '1', method });
+
+  it('__proto__ / constructor / hasOwnProperty 都必须被拒', () => {
+    for (const evil of ['__proto__', 'constructor', 'hasOwnProperty', 'toString', 'valueOf']) {
+      expect(call(evil), `${evil} 被当作合法方法放行`).toBeNull();
+    }
+  });
+
+  it('已声明的方法仍然通过（不能把校验做成恒拒）', () => {
+    expect(call('node.get')).toEqual({
+      type: 'host:call',
+      id: '1',
+      method: 'node.get',
+      params: undefined,
+    });
+  });
+
+  it('requiredPermission 对原型链键返回 null（语义即"无需权限"）', () => {
+    // 若返回 Object.prototype 之类的对象，调用方会把它当权限用，
+    // 于是「无需权限」被误判为「已授权」。
+    expect(requiredPermission('__proto__' as never)).toBeNull();
+    expect(requiredPermission('constructor' as never)).toBeNull();
+    // 真实方法的权限不能被误伤
+    expect(requiredPermission('node.get')).toBe('node.read');
+    expect(requiredPermission('node.patch')).toBe('node.write');
+    expect(requiredPermission('host.toast')).toBeNull();
+  });
+
+  it('空字符串与非字符串方法名被拒', () => {
+    expect(call('')).toBeNull();
+    expect(parsePluginMessage({ type: 'host:call', id: '1', method: 123 })).toBeNull();
+    expect(parsePluginMessage({ type: 'host:call', id: '1', method: null })).toBeNull();
+  });
+});

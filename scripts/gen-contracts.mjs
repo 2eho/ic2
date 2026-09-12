@@ -281,7 +281,39 @@ const outputs = [
 const { spawnSync } = await import('node:child_process');
 const { mkdtempSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');
-const { join } = await import('node:path');
+const { join, resolve } = await import('node:path');
+
+// 关键：格式化工具必须用**绝对路径**解析。
+// 只写 `gofmt` 时 Node 不会查 PATH：它先按无扩展名文件查找，找不到再补 .exe，
+// 全是相对当前目录的路径，因此 `gofmt` 会直接 ENOENT（Linux/macOS 同理）。
+// 后果不是「报错」，而是**静默降级**：格式化失败 → 返回未格式化内容 → 与仓库中
+// 已格式化的生成物不等 → gen-check 永远红；而写回模式下会把未格式化内容覆盖上去，
+// 把工作区越改越脏（下一节正是这个问题的实测复现）。
+// 解析顺序刻意是「显式候选路径 → PATH」而不是反过来：
+// prettier 装在 web/node_modules/.bin，CI 的 gen-check 步骤不会把该目录加进 PATH，
+// 只查 PATH 会让这条门禁在 CI 上永远报「找不到 prettier」而本地正常——
+// 也就是「本地绿、CI 红」的经典形态。显式候选路径让两条环境一致。
+const resolveTool = (name, extraDirs = []) => {
+  for (const dir of extraDirs) {
+    // 必须转成绝对路径：spawnSync 会先按 `cwd` 切换目录再执行，
+    // 相对路径的候选（web/node_modules/.bin/prettier）在 cwd=web 下会变成
+    // web/web/node_modules/... 而 ENOENT——报错信息是「执行失败（退出码 null）」，
+    // 完全看不出真实原因。这类「路径被二次解析」的坑只有实测才会暴露。
+    const candidate = resolve(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  const probe = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
+  if (probe.status === 0) return probe.stdout.trim() || null;
+  return null;
+};
+
+const GOFMT = resolveTool('gofmt');
+const PRETTIER = resolveTool('prettier', [join('web', 'node_modules', '.bin')]);
+
+// 工具缺失时**显式失败**，不允许降级成「不格式化就写下去」：
+// docs/design/13 §3.4 的门禁纪律是「生成物必须与 contracts 一致」，
+// 而「一致」的定义包含格式。既然 gen-check 只在 CI 跑，CI 缺工具就必须红，
+// 否则这条门禁会以「看起来通过」的方式失效（与 `|| echo 跳过` 同一类错误）。
 
 // 生成物必须与仓库的格式化配置一致，否则 `make gen` 之后 `make fmt-check` 仍会红，
 // 形成「生成——格式化——再生成」的循环（上一轮踩过的同类问题）。
@@ -291,15 +323,29 @@ const formatInMemory = (path, content, kind) => {
   const ext = kind === 'go' ? 'go' : 'ts';
   const tmp = join(dir, `out.${ext}`);
   writeFileSync(tmp, content);
-  const r =
-    kind === 'go'
-      ? spawnSync('gofmt', ['-w', tmp], { stdio: 'ignore' })
-      : spawnSync('npx', ['--no-install', 'prettier', '--write', tmp], {
-          cwd: 'web',
-          stdio: 'ignore',
-          shell: process.platform === 'win32',
-        });
-  if (r.status !== 0) return content;
+
+  let r;
+  if (kind === 'go') {
+    if (!GOFMT) {
+      problems.push('未找到 gofmt（Go 工具链）：无法保证生成物格式，请安装后重试');
+      return content;
+    }
+    r = spawnSync(GOFMT, ['-w', tmp], { stdio: 'ignore' });
+  } else {
+    if (!PRETTIER) {
+      // prettier 来自 web/node_modules；它不存在说明前端依赖没装。
+      // 这时报「依赖没装」而不是「契约不一致」，否则会把人引到错误的方向。
+      problems.push('未找到 prettier（请执行 cd web && npm install）：无法保证生成物格式');
+      return content;
+    }
+    r = spawnSync(PRETTIER, ['--write', tmp], { cwd: 'web', stdio: 'ignore' });
+  }
+  // 工具存在但执行失败同样是硬错误：静默返回未格式化内容会让这个问题以
+  // 「生成物与契约不一致」的面目出现，而真实原因是格式化失败。
+  if (r.status !== 0) {
+    problems.push(`${kind === 'go' ? 'gofmt' : 'prettier'} 执行失败（退出码 ${r.status}）：${path}`);
+    return content;
+  }
   return readFileSync(tmp, 'utf8');
 };
 
@@ -314,6 +360,9 @@ for (const [path, content, kind] of outputs) {
     problems.push(`${path} 与契约不一致（请执行 make gen 并提交）`);
     continue;
   }
+  // 格式化失败时不要写盘：否则会把未格式化的内容落到工作区，
+  // 让「一次失败的 gen」污染后续所有检查（实测会把 gofmt-check 一起带红）。
+  if (problems.length) continue;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, formatted);
   written.push(path);
