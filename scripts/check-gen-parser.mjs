@@ -64,6 +64,80 @@ const runGen = (check) => {
 };
 const genFirst = runGen(false);
 const genSecond = runGen(true);
+
+// 3b) **跨任务依赖**不得进入 gen-check：CI 的任务是隔离的，
+//     prettier 随 `npm install --prefix web` 装在 web/node_modules，
+//     而安装在 web-gate 任务里，gate 任务看不到它。
+//     真实缺陷（PR #2 门禁红）：gate 任务跑 gen-check 时缺 prettier，
+//     旧实现把它记成 problem 并 exit 1，随后又在**未格式化**文本上比较，
+//     于是同一根因刷出两条「契约不一致」，把人引向「改契约」的错误方向。
+//     现在缺 prettier 必须不阻断契约校验，且不得谎报成「契约与代码一致」
+//     （要说明少了格式维度）。
+const GEN = 'scripts/gen-contracts.mjs';
+// PATH 里必须留着 node 本身（否则连被测脚本都起不来），只摘掉 prettier 所在目录。
+// 做法：用 `command -v node` 的目录拼一条不含 node_modules/.bin 的 PATH。
+const nodeDir = spawnSync('sh', ['-c', 'command -v node'], { encoding: 'utf8' }).stdout.trim();
+const nodeBinDir = nodeDir ? nodeDir.slice(0, nodeDir.lastIndexOf('/')) : '';
+const noPrettierEnv = {
+  ...process.env,
+  PATH: [nodeBinDir, '/usr/bin', '/bin'].filter(Boolean).join(':'),
+};
+const noPrettier = spawnSync('node', [GEN, '--check'], {
+  encoding: 'utf8',
+  cwd: process.cwd(),
+  env: noPrettierEnv,
+});
+// 前提：这条测试要模拟的是「gate 任务里解析不到 prettier」。
+//   - 若 web/node_modules 存在（本地已装），脚本会走仓库内路径，
+//     收窄 PATH 不影响它 —— 此时**本机无法复现该场景**，跳过即可，
+//     由 CI 的 gate 任务（没有 node_modules）天然覆盖。跳过必须是显式的，
+//     不能是「什么都不做然后默默通过」。
+//   - 若不存在，则收窄后的 PATH 必须真的找不到 prettier，否则测试是空转。
+const repoPrettier = join('web', 'node_modules', '.bin', 'prettier');
+const hiddenProbe = spawnSync('sh', ['-c', 'command -v prettier || true'], {
+  encoding: 'utf8',
+  env: noPrettierEnv,
+});
+const pathProbe = spawnSync('sh', ['-c', 'command -v node || true'], {
+  encoding: 'utf8',
+  env: noPrettierEnv,
+});
+if (existsSync(repoPrettier)) {
+  console.log('（跳过「缺 prettier」用例：本机已装 web/node_modules，该场景由 CI 的 gate 任务覆盖）');
+} else if (noPrettier.error || !pathProbe.stdout.trim()) {
+  problems.push(
+    '自检失效：收窄 PATH 后 node 本身都起不来，测试环境没造出来——' +
+      '不能据此判定通过（这正是本项目最反对的假绿通道）',
+  );
+} else if (hiddenProbe.stdout.trim()) {
+  problems.push('自检失效：PATH 收窄后仍能找到 prettier，缺工具场景未被真实模拟');
+} else {
+  if (noPrettier.status !== 0) {
+    problems.push(
+      `${GEN} 在缺 prettier 的环境里退出码 ${noPrettier.status}（应为 0）：` +
+        'CI 的 gate 任务没有 web/node_modules，这会让契约门禁与前端依赖耦合成必红。' +
+        `输出：${String(noPrettier.stderr || noPrettier.stdout || '').trim().split('\n').slice(-3).join(' / ')}`,
+    );
+  }
+  // 缺 prettier 时只有两种可接受结局，二者都必须**可见**：
+  //   a. 有 npm exec 兜底 → 格式仍被校验（此时不需要提示，因为它没降级）；
+  //   b. 兜底也不可用（离线）→ 必须打印「格式未校验」。
+  // 真正禁止的是第三种：没校验、也不说 —— 那就是假绿。
+  const quietWithoutFallback =
+    !/prettier/i.test(noPrettier.stdout + noPrettier.stderr) &&
+    !/未(?:找到|校验)/.test(noPrettier.stdout + noPrettier.stderr);
+  const probeFallback = spawnSync('sh', ['-c', 'npm exec --yes -- prettier@3.9.6 --version >/dev/null 2>&1'], {
+    encoding: 'utf8',
+    env: noPrettierEnv,
+    cwd: process.cwd(),
+  });
+  if (quietWithoutFallback && probeFallback.status !== 0) {
+    problems.push(
+      `${GEN} 缺 prettier 且 npm exec 兜底不可用，却既未失败也未说明「格式未校验」——` +
+        '降级不可见即是假绿',
+    );
+  }
+}
 if (genFirst.status !== genSecond.status) {
   problems.push(
     `gen-contracts 非幂等：gen 退出码 ${genFirst.status}，随后的 gen-check 退出码 ${genSecond.status}`,

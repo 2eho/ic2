@@ -6,8 +6,22 @@ import { renderToDOM, jsx } from "./jsx-runtime.js";
 // renderToDOM 需要真实 DOM。这里用 jsdom 而不是自己写一个替身：
 // 「注入的 <script> 有没有被执行」这类断言只有在真实 DOM 上才成立。
 import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-const { JSDOM } = require("/workspace/web/node_modules/jsdom");
+import { dirname, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
+// jsdom 随前端依赖安装（web/node_modules）。这里从**本文件位置**反推仓库根，
+// 而不是写死绝对路径——写死会让「仓库不在 /workspace」的环境直接 MODULE_NOT_FOUND，
+// 而报错信息看起来像「jsdom 没装」，把人引向错误方向。
+const HERE = dirname(fileURLToPath(import.meta.url));
+const WEB_PKG = resolvePath(HERE, "../../../web/package.json");
+let JSDOM;
+try {
+  const req = createRequire(WEB_PKG);
+  ({ JSDOM } = req("jsdom"));
+} catch (err) {
+  throw new Error(
+    "无法加载 jsdom（请先执行 `npm install --prefix web`）：" + err.message,
+  );
+}
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.document = dom.window.document;
 globalThis.Document = dom.window.Document;

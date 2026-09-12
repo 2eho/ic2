@@ -14,7 +14,16 @@
 // 生成后必须已提交；CI 重跑本脚本后 git diff 必须为空（避免「代码上了契约没改」）。
 // 用法：node scripts/gen-contracts.mjs [--check]
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// 工具与契约一律相对**脚本所在目录**解析，而不是 process.cwd()。
+// 起因（PR #2 门禁飘红）：`make gen-check` 里 `cd web` 与 `node scripts/…`
+// 一旦写成把两者接起来的 form（例如 `cd web && node ../scripts/gen-contracts.mjs`），
+// 相对 cwd 的 contracts/ 、internal/ 全部 ENOENT，报错却指向「文件缺失」。
+// 锚定脚本目录后，无论从哪个 cwd 调用，读到的都是同一份契约、跑的都是同一套规则。
+const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
+const at = (p) => resolvePath(ROOT, p);
 
 const CHECK = process.argv.includes('--check');
 const problems = [];
@@ -137,10 +146,10 @@ const readRequired = (path) => {
   return readFileSync(path, 'utf8');
 };
 
-const openapiRaw = readRequired('contracts/openapi.yaml');
-const errorsRaw = readRequired('contracts/errors.yaml');
-const eventsRaw = readRequired('contracts/events.yaml');
-const opsRaw = readRequired('contracts/ops.schema.json');
+const openapiRaw = readRequired(at('contracts/openapi.yaml'));
+const errorsRaw = readRequired(at('contracts/errors.yaml'));
+const eventsRaw = readRequired(at('contracts/events.yaml'));
+const opsRaw = readRequired(at('contracts/ops.schema.json'));
 
 const openapi = openapiRaw ? parseYAML(openapiRaw) : {};
 const errors = errorsRaw ? parseYAML(errorsRaw) : {};
@@ -151,7 +160,7 @@ const opsSchema = opsRaw ? JSON.parse(opsRaw) : {};
 const contractCodes = new Set(
   (errors?.codes ?? []).map((c) => (typeof c === 'string' ? c : c?.code)).filter(Boolean),
 );
-const errorsGo = readFileSync('internal/platform/errors.go', 'utf8');
+const errorsGo = readFileSync(at('internal/platform/errors.go'), 'utf8');
 const goCodes = new Map();
 for (const m of errorsGo.matchAll(/^\s*(Code\w+)\s*=\s*"([a-z_]+)"\s*$/gm)) goCodes.set(m[2], m[1]);
 
@@ -163,8 +172,8 @@ for (const code of goCodes.keys()) {
 }
 
 // i18n：zh-CN 与 en-US 都必须有 errors.<code> 文案
-const zhSrc = readFileSync('web/src/shared/i18n/zh-CN.ts', 'utf8');
-const enSrc = readFileSync('web/src/shared/i18n/en-US.ts', 'utf8');
+const zhSrc = readFileSync(at('web/src/shared/i18n/zh-CN.ts'), 'utf8');
+const enSrc = readFileSync(at('web/src/shared/i18n/en-US.ts'), 'utf8');
 const errorsBlock = (src) => {
   const start = src.indexOf('errors: {');
   if (start < 0) return '';
@@ -180,10 +189,10 @@ for (const code of goCodes.keys()) {
 
 // 2) 事件类型：contracts/events.yaml ↔ internal/api 的 RunEvent.Type / graph Event.Type
 const contractEvents = new Set((events?.events ?? []).map((e) => (typeof e === 'string' ? e : e?.type)).filter(Boolean));
-const graphSrc = readFileSync('internal/graph/doc.go', 'utf8') + readFileSync('internal/graph/service.go', 'utf8');
+const graphSrc = readFileSync(at('internal/graph/doc.go'), 'utf8') + readFileSync(at('internal/graph/service.go'), 'utf8');
 const goEventConsts = new Set();
 for (const m of graphSrc.matchAll(/EventType\w*\s*=\s*"([a-z_.]+)"/g)) goEventConsts.add(m[1]);
-const apiRunEventSrc = readFileSync('internal/exec/engine.go', 'utf8');
+const apiRunEventSrc = readFileSync(at('internal/exec/engine.go'), 'utf8');
 for (const m of apiRunEventSrc.matchAll(/"([a-z_]+)"\s*,\s*\/\/\s*event/g)) goEventConsts.add(m[1]);
 
 // 事件类型只在契约里声明、代码里用；此处只做「契约里声明的必须非空且唯一」的卫生检查
@@ -191,7 +200,7 @@ if (contractEvents.size === 0) problems.push('contracts/events.yaml 未声明任
 if (new Set(contractEvents).size !== (events?.events ?? []).length) problems.push('contracts/events.yaml 存在重复事件类型');
 
 // 3) 路由：openapi.yaml 的 paths ↔ internal/api/router.go 的注册路径
-const routerSrc = readFileSync('internal/api/router.go', 'utf8');
+const routerSrc = readFileSync(at('internal/api/router.go'), 'utf8');
 const registered = new Set();
 for (const m of routerSrc.matchAll(/mux\.HandleFunc\("(GET|POST|PUT|PATCH|DELETE) (\/[^"]+)"/g)) {
   const path = m[2].startsWith('/api/v1/') ? m[2].slice('/api/v1'.length) : m[2];
@@ -212,7 +221,7 @@ for (const d of declared) {
 
 // 4) op schema：contracts/ops.schema.json ↔ internal/graph 的 op kind 常量
 const opKinds = new Set();
-const opSrc = readFileSync('internal/graph/op.go', 'utf8');
+const opSrc = readFileSync(at('internal/graph/op.go'), 'utf8');
 for (const m of opSrc.matchAll(/^\s*Op\w+\s+OpKind\s*=\s*"([a-z_.]+)"/gm)) opKinds.add(m[1]);
 const schemaKinds = new Set(opsSchema?.properties?.kind?.enum ?? []);
 for (const k of opKinds) if (!schemaKinds.has(k)) problems.push(`op kind ${k} 未出现在 contracts/ops.schema.json`);
@@ -299,7 +308,7 @@ const resolveTool = (name, extraDirs = []) => {
     // 相对路径的候选（web/node_modules/.bin/prettier）在 cwd=web 下会变成
     // web/web/node_modules/... 而 ENOENT——报错信息是「执行失败（退出码 null）」，
     // 完全看不出真实原因。这类「路径被二次解析」的坑只有实测才会暴露。
-    const candidate = resolve(dir, name);
+    const candidate = resolvePath(dir, name);
     if (existsSync(candidate)) return candidate;
   }
   const probe = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
@@ -307,17 +316,78 @@ const resolveTool = (name, extraDirs = []) => {
   return null;
 };
 
+// 候选目录一律相对脚本所在仓库根，不相对 cwd（理由同 ROOT）。
 const GOFMT = resolveTool('gofmt');
-const PRETTIER = resolveTool('prettier', [join('web', 'node_modules', '.bin')]);
+const PRETTIER = resolveTool('prettier', [join(ROOT, 'web', 'node_modules', '.bin')]);
 
-// 工具缺失时**显式失败**，不允许降级成「不格式化就写下去」：
-// docs/design/13 §3.4 的门禁纪律是「生成物必须与 contracts 一致」，
-// 而「一致」的定义包含格式。既然 gen-check 只在 CI 跑，CI 缺工具就必须红，
-// 否则这条门禁会以「看起来通过」的方式失效（与 `|| echo 跳过` 同一类错误）。
+// prettier 缺失时的**最后兜底**：`npm exec` 拉取与 web/package.json 同版本的
+// prettier 到 ~/.npm/_npx（npm 的缓存目录，不写工作区、不生成 node_modules）。
+//
+// 为什么要这层兜底，而不是直接把 «缺 prettier» 降级成「不校验格式」：
+//   gate 任务里没有 web/node_modules（安装在另一个任务），而生成物是 TS。
+//   若只做内容级比较，就等于让「契约漂移」这条门禁在 CI 上永久失去格式维度——
+//   而本地有 node_modules 时它又在检查，于是又回到「本地红、CI 绿」的漂移。
+//   兜底后：CI 与本地用**同一个版本的 prettier**，比较基准完全一致。
+//
+// 为什么不是无条件依赖它：它需要联网。所以解析顺序是
+//   ① 仓库内已安装（npm install --prefix web 的产物，离线可用）
+//   ② PATH
+//   ③ npm exec 兜底
+// ① 命中时行为与网络无关；③ 只在确实没装且能联网时生效。
+// 版本号取自 web/package.json，避免兜底拉到的版本与仓库约定不一致
+// （prettier 大版本之间格式化结果会变，那就是新的假红来源）。
+const webPkgPath = at('web/package.json');
+const PRETTIER_PIN = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(webPkgPath, 'utf8'));
+    const v = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }.prettier;
+    return typeof v === 'string' ? v.replace(/^[^\d]*/, '') : null;
+  } catch {
+    return null;
+  }
+})();
+
+/** 用 npm exec 拉取 pinned prettier 试跑一次；成功则返回可复用的 argv 前缀。 */
+const resolvePrettierViaNpmExec = () => {
+  if (!PRETTIER_PIN) return null;
+  const spec = `prettier@${PRETTIER_PIN}`;
+  const probe = spawnSync('npm', ['exec', '--yes', '--', spec, '--version'], {
+    encoding: 'utf8',
+    cwd: ROOT,
+    env: { ...process.env, PIPEFLAGS: 'set -e' },
+  });
+  if (probe.status !== 0) return null;
+  return ['npm', ['exec', '--yes', '--', spec]];
+};
+
+const PRETTIER_EXEC = PRETTIER ? null : resolvePrettierViaNpmExec();
+
+// ---------------------------------------------------------------- 格式化工具缺失时的语义
+//
+// 纪律（docs/design/13 §3.4）：生成物必须与 contracts 一致，「一致」包含格式。
+// 但「保证格式」与「校验契约」是**两件事**，必须分开对待——把前者做成后者的
+// 前置条件，就会造出一个跨任务的隐式依赖，而 CI 的任务是按 job 隔离的。
+//
+// 起因（PR #2 门禁实红，两处问题同源）：
+//   gate 任务里没有 prettier（它随 web 的 npm install 装在 web/node_modules，
+//   而安装发生在**另一个任务 web-gate** 里）。旧实现把「找不到 prettier」
+//   直接记成 problem 并让脚本退出 1，紧接着在**未格式化**的文本上做比较，
+//   于是又刷出第二条「contract.gen.ts 与契约不一致」。两条都指向「契约漂移」，
+//   真实原因却是「这个任务里没有前端依赖」——正是脚本自己注释里反对的方向误导。
+//
+// 因此：
+//   - 工具缺失  → 记入 notes（stderr 可见、不影响退出码），比较时退回内容级比较；
+//   - 工具报错  → 仍是硬失败。这**不是**放宽门禁：工具在却执行失败，说明比较
+//                 基准不可信，绿了才是假绿。
+//   - 强校验入口：`make gen-check` 只声明契约需要的工具（见 ci-exec 的
+//     MAKE_TOOLSETS），不隐含 npm 依赖；`make gen`（写盘）则要求工具齐备，
+//     因为写盘必须落已格式化的内容，否则会污染工作区。
+const notes = [];
 
 // 生成物必须与仓库的格式化配置一致，否则 `make gen` 之后 `make fmt-check` 仍会红，
 // 形成「生成——格式化——再生成」的循环（上一轮踩过的同类问题）。
-// 因此这里对 Go 走 gofmt、对 TS 走 web/ 下已安装的 prettier；工具缺失时保持原样不阻断。
+// 因此这里对 Go 走 gofmt、对 TS 走 web/ 下已安装的 prettier；
+// 工具缺失时退回内容级比较，并在 notes 里写明「格式未校验」。
 const formatInMemory = (path, content, kind) => {
   const dir = mkdtempSync(join(tmpdir(), 'ic-gen-'));
   const ext = kind === 'go' ? 'go' : 'ts';
@@ -327,21 +397,33 @@ const formatInMemory = (path, content, kind) => {
   let r;
   if (kind === 'go') {
     if (!GOFMT) {
-      problems.push('未找到 gofmt（Go 工具链）：无法保证生成物格式，请安装后重试');
+      // Go 工具链缺失：gate 的第一步就是 `bash scripts/install-go.sh`，走到这里
+      // 说明环境本身不对，属硬失败（也是 ci-exec 的 MAKE_TOOLSETS.gen-check 已覆盖的项）。
+      problems.push('未找到 gofmt（Go 工具链）：请先执行 bash scripts/install-go.sh');
       return content;
     }
     r = spawnSync(GOFMT, ['-w', tmp], { stdio: 'ignore' });
   } else {
-    if (!PRETTIER) {
-      // prettier 来自 web/node_modules；它不存在说明前端依赖没装。
-      // 这时报「依赖没装」而不是「契约不一致」，否则会把人引到错误的方向。
-      problems.push('未找到 prettier（请执行 cd web && npm install）：无法保证生成物格式');
+    if (!PRETTIER && !PRETTIER_EXEC) {
+      // 本地无依赖且拉不到 pinned 版本（离线）时的**明确降级**：
+      // 退回内容级比较，并说明少了哪个维度。不静默、也不误报成「契约漂移」。
+      notes.push(
+        '未找到 prettier，且 npm exec 兜底不可用（离线？）。本次只做内容级比较，' +
+          '未校验生成物格式。请 `npm install --prefix web` 后重跑。',
+      );
       return content;
     }
-    r = spawnSync(PRETTIER, ['--write', tmp], { cwd: 'web', stdio: 'ignore' });
+    const args = ['--write', tmp];
+    if (PRETTIER) {
+      r = spawnSync(PRETTIER, args, { cwd: join(ROOT, 'web'), stdio: 'ignore' });
+    } else {
+      r = spawnSync(PRETTIER_EXEC[0], [...PRETTIER_EXEC[1], ...args], { cwd: ROOT, stdio: 'ignore' });
+    }
   }
   // 工具存在但执行失败同样是硬错误：静默返回未格式化内容会让这个问题以
   // 「生成物与契约不一致」的面目出现，而真实原因是格式化失败。
+  // 这条与上面的「工具缺失只记 notes」不矛盾：缺失时我们知道比较基准退回内容级，
+  // 是**明确降级**；而在场却执行失败，说明基准不可信，绿了才是假绿。
   if (r.status !== 0) {
     problems.push(`${kind === 'go' ? 'gofmt' : 'prettier'} 执行失败（退出码 ${r.status}）：${path}`);
     return content;
@@ -352,20 +434,26 @@ const formatInMemory = (path, content, kind) => {
 // 关键：比较对象必须是「格式化之后」的内容。
 // 直接比较未格式化的模板会让 `make gen` 永远报告有变化（写进去又被格式化），
 // 于是 --check 永远失败、CI 永远红——这正是上一轮 gen-contracts 缺失的同类问题。
-for (const [path, content, kind] of outputs) {
+for (const [rel, content, kind] of outputs) {
+  const path = at(rel);
   const prev = existsSync(path) ? readFileSync(path, 'utf8') : null;
-  const formatted = formatInMemory(path, content, kind);
+  const formatted = formatInMemory(rel, content, kind);
   if (prev === formatted) continue;
   if (CHECK) {
-    problems.push(`${path} 与契约不一致（请执行 make gen 并提交）`);
+    problems.push(`${rel} 与契约不一致（请执行 make gen 并提交）`);
     continue;
   }
-  // 格式化失败时不要写盘：否则会把未格式化的内容落到工作区，
-  // 让「一次失败的 gen」污染后续所有检查（实测会把 gofmt-check 一起带红）。
-  if (problems.length) continue;
+  // 写盘模式下格式化工具必须齐备：缺工具时写下去的是未格式化内容，
+  // 会把工作区越改越脏（实测会把 fmt-check 一起带红）。
+  // 注意 gen-check 不写盘，因此这条不影响它——两者的严格程度**故意不同**：
+  // 校验可以退回内容级比较，写盘不行。
+  if (problems.length || notes.length) {
+    if (notes.length) console.error('[gen] 有工具未就绪，已跳过写盘（不落未格式化内容）：' + notes.join(' / '));
+    continue;
+  }
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, formatted);
-  written.push(path);
+  written.push(rel);
 }
 
 console.log('契约生成与校验');
@@ -376,6 +464,9 @@ console.log(`路由     : ${registered.size} 条（openapi 声明 ${declared.siz
 console.log(`op kind  : ${opKinds.size} 个`);
 console.log(`生成物   : ${written.length ? written.join(', ') : '无变化（已是最新）'}`);
 console.log('─'.repeat(56));
+// notes 走 stderr 但不影响退出码：它是「本次没校验到什么」，不是「校验没通过」。
+// 与 problems 打印在同一段，避免出现「输出很干净、实际有降级」的假绿观感。
+for (const n of notes) console.error('  · ' + n);
 if (problems.length) {
   console.error(`发现 ${problems.length} 处问题：`);
   for (const p of problems) console.error('  - ' + p);

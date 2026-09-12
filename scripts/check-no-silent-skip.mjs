@@ -99,7 +99,8 @@ if (existsSync('.cnb.yml')) {
     const ALLOWED_EXACT = [
       'bash scripts/upstream-sync.sh || true', // 上游巡检只产出报告，不阻断
     ];
-    const code = line.trim();
+    // 单行 script 形式：`script: bash ...`（本轮起 YAML 里门禁/巡检都写成单行）
+    const code = line.trim().replace(/^script:\s*/, '');
     if (ALLOWED_EXACT.includes(code)) return;
     problems.push(
       `.cnb.yml:${i + 1} 门禁步骤用 \`|| true\` 兜底：把红变绿（如确需允许失败，` +

@@ -128,10 +128,17 @@ test-agent: ## 本机桥接器单测（事件归一化 + 安全边界）
 	cd canvas-agent && node --test src/*.test.js
 
 .PHONY: test-sdk
-test-sdk: ## 插件 SDK 单测（清单校验 + JSX runtime 的属性白名单 + 构建脚本）
+test-sdk: deps-web-check ## 插件 SDK 单测（清单校验 + JSX runtime 的属性白名单 + 构建脚本）
 	# SDK 是给第三方作者用的**对外契约**，它的类型与运行时必须有门禁：
 	# 没有门禁时「协议新增一个字段、SDK 没跟上」只能等作者踩坑才发现。
 	cd packages/plugin-sdk && node --test src/sdk.test.js
+
+.PHONY: test-scripts
+test-scripts: ## 门禁脚本自测（ci-exec 拆分逻辑 + check-cnb-config 反向验证）
+	# 拆分逻辑静默出错会表现为「CI 里某条命令莫名收到多余参数」，很难定位；
+	# 校验脚本若只对当前文件说 OK 则毫无价值——必须证明坏写法真的会红。
+	# 两类都是「门禁的门禁」，因此进 CI。
+	node --test scripts/ci-exec.test.mjs scripts/check-cnb-config.test.mjs
 
 .PHONY: cover
 cover: test ## 覆盖率报告

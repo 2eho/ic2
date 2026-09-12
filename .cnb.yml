@@ -3,102 +3,60 @@
 # 设计说明：docs/design/13-verification-and-iteration.md §3（L2 实现核验）、
 #          docs/design/12-legacy-and-upstream.md §3（上游契约面探针）
 #
-# 三条纪律（上一轮踩过的坑，写在这里防止复发）：
+# 四条纪律（都是 CI 上真实红过的坑，写在这里防止复发）：
 #   1. 分支下的键必须是**事件名**（push / pull_request / crontab: …）；
-#      裸 "**" 不是事件名（上一轮因此整条 gate 未生效）。
-#   2. 门禁只调用 `make <target>`，不在 YAML 里重写命令——
-#      YAML 与 Makefile 各写一份必然漂移（上一轮 make sec 的用例名就已失效）。
-#   3. 不允许 `|| true` 兜住真门禁：那等于把红变绿。只有「上游巡检」这类
+#      裸 "**" 不是事件名（因此整条 gate 曾未生效）。
+#   2. 每个 stage 的 script 只写**一行、且不含反斜杠**。平台的 YAML 解析会把
+#      块标量按 C 风格转义处理：合法换行被压成空格、`\n` 被换成真实换行，
+#      于是两行命令会合成一条、argv 被污染（`go version: node: no such file`）。
+#      需要串行就拆成多个 stage，或在 node 侧由 ci-exec 承载（见下）。
+#   3. 门禁只调用 `make <target>`，不在 YAML 里重写命令——
+#      YAML 与 Makefile 各写一份必然漂移（`make sec` 的用例名就已失效过）。
+#   4. 不允许 `|| true` 兜住真门禁：那等于把红变绿。只有「上游巡检」这类
 #      允许失败的任务才显式 || true，并说明理由。
-
-# 门禁步骤（YAML 锚点，push / pull_request 共用同一份，避免两处漂移）
-.gate-stages: &gate-stages
-  - name: 工具链就绪
-    script: |
-      set -euo pipefail
-      go version
-      node -v
-      make preflight
-
-  - name: 契约与格式
-    script: |
-      set -euo pipefail
-      # 契约先行：生成物必须已提交（改契约不改代码 / 改代码不改契约都会红）
-      make gen-check
-      make fmt-check
-
-  - name: 静态检查与架构约束
-    script: |
-      set -euo pipefail
-      # lint 内含 check-no-silent-skip.mjs（禁止「跳过/兜底」把失败变绿）
-      make lint
-
-  - name: 单元测试与对抗用例
-    script: |
-      set -euo pipefail
-      make test-go
-      # 本机桥接器：事件归一化 + 安全边界（Origin 白名单 / 令牌比较）
-      make test-agent
-      make agent-check
-      # 插件 SDK：清单校验 + JSX runtime 属性白名单 + 构建脚本
-      make test-sdk
-      # 对抗用例是发版门禁（docs/design/13 §3.2）：缺一条即失败
-      make adversary
-
-  - name: 安全门禁
-    script: |
-      set -euo pipefail
-      # 凭据脱敏 / SSRF / 插件权限 / 资产隔离 / 上游幂等
-      make sec
-
-  - name: 故障演练子集
-    script: |
-      set -euo pipefail
-      # 时钟回拨 / 配置非法 / DB 不可用 / 冲突 / 恢复 / 工作区删除
-      make drill
-
-  - name: 对等矩阵覆盖率
-    script: |
-      set -euo pipefail
-      # 报告 + 门槛校验：M7 发版要求 100%（剩余项要么 done 要么显式 dropped）
-      make parity
+#
+# 为什么 gate 的 stage 要逐条列出、不用 YAML 锚点：
+#   YAML 锚点（`&` 定义 / `*` 引用）在**平台侧展开**，人跟校验脚本在源文件里都看不到实际步骤。
+#   本轮就吃过一次：锚点里少了 `make upstream-radar`，而两个 job 都引用同一个锚点，
+#   于是「本地 make check 会红、CI 不会红」这种漂移没人看得见。
+#   显式列出后，push / pull_request 两份必须逐字相同（改一处就得改两处，
+#   虽然啰嗦，但漂移会在 review 里直接可见）。
+#
+# 为什么门禁命令长这样：
+#   平台会先解析 .cnb.yml 再执行。实测该解析对块标量做 C 风格转义，
+#   dash 的 echo 又**不解释反斜杠**，所以多行脚本会退化成一条被压平的命令。
+#   因此每个 stage 只留**一行** `node scripts/ci-exec.mjs run -- <cmd>`：
+#   YAML 层无换行、无反斜杠，平台怎么转义都伤不到；命令行的拆分与引号语义
+#   全部下沉到 scripts/ci-exec.mjs（它同时承载严格模式与工具链自检）。
 
 # 前端门禁（需要 node 环境，与 Go 门禁分开跑以便并行）
 .web-stages: &web-stages
   - name: 安装依赖
-    script: |
-      set -euo pipefail
-      cd web && npm install --no-audit --no-fund
+    script: node scripts/ci-exec.mjs run -- npm install --no-audit --no-fund --prefix web
 
   - name: 类型检查
-    script: |
-      set -euo pipefail
-      cd web && npm run lint
+    script: node scripts/ci-exec.mjs run -- npm run lint --prefix web
 
   - name: 前端单测
-    script: |
-      set -euo pipefail
-      cd web && npm test
+    script: node scripts/ci-exec.mjs run -- npm test --prefix web
 
   - name: 生产构建与性能预算
-    script: |
-      set -euo pipefail
-      # 门禁需要的是**生产产物**（E2E_MOUNT 关闭），确保「e2e 专用入口不进生产」
-      cd web && npm run build
-      # 产物体积按 gzip 衡量（首屏体积是「打开画布 < 1.5s」的最强相关因子）
-      make perf
-      # 前端产物构建后，用带挂载点的版本构建 e2e 产物，供端到端加载真实实现
-      make e2e-build
+    script: node scripts/ci-exec.mjs run -- npm run build --prefix web
+
+  - name: 性能预算
+    script: node scripts/ci-exec.mjs run -- make perf
+
+  - name: 端到端产物构建
+    script: node scripts/ci-exec.mjs run -- make e2e-build
+
+  - name: 安装浏览器
+    script: node scripts/ci-exec.mjs run -- npx --yes playwright install --with-deps chromium
+
+  - name: Go 工具链（e2e 前置）
+    script: node scripts/ci-exec.mjs run -- bash scripts/install-go.sh
 
   - name: 端到端（真实服务端）
-    script: |
-      set -euo pipefail
-      # 起真实服务端进程 + 同源托管的产物，再跑 Playwright。
-      # `make e2e` 内部会先跑 check-no-silent-skip.mjs：
-      # 「拿不到后端就自动跳过」这种假绿通道在本轮被全部堵掉。
-      npx --yes playwright install --with-deps chromium
-      make e2e
-
+    script: node scripts/ci-exec.mjs run -- make e2e
 main:
   # 每周一 03:00（UTC）巡检上游「契约面」变化，产出报告与待办（不自动改代码）。
   # 巡检失败不阻断：它只产出报告，是否跟进由人/评审决定。
@@ -111,43 +69,94 @@ main:
         UPSTREAM_REF: main
       stages:
         - name: 抽取上游契约面变化
-          script: |
-            set -euo pipefail
-            bash scripts/upstream-sync.sh || true
-            echo "---- change-report 摘要 ----"
-            node -e "
-              const fs = require('fs');
-              const p = 'upstream/change-report.json';
-              if (!fs.existsSync(p)) { console.log('无报告（上游未变化）'); process.exit(0); }
-              const r = JSON.parse(fs.readFileSync(p, 'utf8'));
-              console.log('verdict:', r.verdict);
-              console.log('from   :', r.from.version, r.from.commit);
-              console.log('to     :', r.to.version, r.to.commit);
-              const probes = r.probes || {};
-              for (const key of Object.keys(probes)) {
-                const value = probes[key];
-                if (Array.isArray(value) && value.length) console.log(key, '=>', value.slice(0, 20));
-                else if (key === 'limitsChanged' && Array.isArray(value) && value.length) console.log(key, '=>', value);
-              }
-            "
+          # 巡检只产出报告、允许失败：唯一白名单内的 || true。
+          script: bash scripts/upstream-sync.sh || true
+        - name: 输出变化摘要
+          # 摘要渲染放在 node 脚本里，YAML 保持单行无转义（同上面对 gate 的理由）。
+          script: node scripts/upstream-summary.mjs
 
   # 推送门禁（分支通配 "**" 只能出现在事件之下，不能作为事件名）
   push:
     - name: gate
       docker:
-        image: golang:1.24
-      stages: *gate-stages
+        image: node:22
+      stages:
+        - name: 前端依赖（契约与静态检查前置）
+          script: node scripts/ci-exec.mjs run -- npm install --no-audit --no-fund --prefix web
+        - name: Go 工具链（镜像内安装）
+          script: node scripts/ci-exec.mjs run -- bash scripts/install-go.sh
+        - name: 工具链探针
+          script: node scripts/ci-exec.mjs probe go gofmt node npm prettier
+        - name: 格式校验
+          script: node scripts/ci-exec.mjs run -- make fmt-check
+        - name: 契约与格式
+          script: node scripts/ci-exec.mjs run -- make gen-check
+        - name: 静态检查与架构约束
+          script: node scripts/ci-exec.mjs run -- make lint
+        - name: Go 单元测试
+          script: node scripts/ci-exec.mjs run -- make test-go
+        - name: 桥接器单元测试
+          script: node scripts/ci-exec.mjs run -- make test-agent
+        - name: 桥接器契约
+          script: node scripts/ci-exec.mjs run -- make agent-check
+        - name: 插件 SDK 门禁
+          script: node scripts/ci-exec.mjs run -- make test-sdk
+        - name: 门禁脚本自测
+          script: node scripts/ci-exec.mjs run -- make test-scripts
+        - name: 对抗用例（发版门禁）
+          script: node scripts/ci-exec.mjs run -- make adversary
+        - name: 安全门禁
+          script: node scripts/ci-exec.mjs run -- make sec
+        - name: 故障演练子集
+          script: node scripts/ci-exec.mjs run -- make drill
+        - name: 对等矩阵覆盖率
+          script: node scripts/ci-exec.mjs run -- make parity
+        - name: 上游巡检产物自检
+          script: node scripts/ci-exec.mjs run -- make upstream-radar
     - name: web-gate
       docker:
         image: node:22
       stages: *web-stages
 
-  # PR 门禁：与推送走完全相同的步骤（同一份锚点）
+  # PR 门禁：与推送走完全相同的步骤（两处内容必须逐字一致，
+  # 因此 gate 的步骤用 `make check` 之外无共享来源——见下方注释「为什么不用锚点」）
   pull_request:
     - name: gate
       docker:
-        image: golang:1.24
-      stages: *gate-stages
+        image: node:22
+      stages:
+        - name: 前端依赖（契约与静态检查前置）
+          script: node scripts/ci-exec.mjs run -- npm install --no-audit --no-fund --prefix web
+        - name: Go 工具链（镜像内安装）
+          script: node scripts/ci-exec.mjs run -- bash scripts/install-go.sh
+        - name: 工具链探针
+          script: node scripts/ci-exec.mjs probe go gofmt node npm prettier
+        - name: 格式校验
+          script: node scripts/ci-exec.mjs run -- make fmt-check
+        - name: 契约与格式
+          script: node scripts/ci-exec.mjs run -- make gen-check
+        - name: 静态检查与架构约束
+          script: node scripts/ci-exec.mjs run -- make lint
+        - name: Go 单元测试
+          script: node scripts/ci-exec.mjs run -- make test-go
+        - name: 桥接器单元测试
+          script: node scripts/ci-exec.mjs run -- make test-agent
+        - name: 桥接器契约
+          script: node scripts/ci-exec.mjs run -- make agent-check
+        - name: 插件 SDK 门禁
+          script: node scripts/ci-exec.mjs run -- make test-sdk
+        - name: 门禁脚本自测
+          script: node scripts/ci-exec.mjs run -- make test-scripts
+        - name: 对抗用例（发版门禁）
+          script: node scripts/ci-exec.mjs run -- make adversary
+        - name: 安全门禁
+          script: node scripts/ci-exec.mjs run -- make sec
+        - name: 故障演练子集
+          script: node scripts/ci-exec.mjs run -- make drill
+        - name: 对等矩阵覆盖率
+          script: node scripts/ci-exec.mjs run -- make parity
+        - name: 上游巡检产物自检
+          script: node scripts/ci-exec.mjs run -- make upstream-radar
     - name: web-gate
       docker:
         image: node:22
@@ -164,10 +173,9 @@ $:
         UPSTREAM_REF: main
       stages:
         - name: 抽取上游契约面变化
-          script: |
-            set -euo pipefail
-            bash scripts/upstream-sync.sh || true
-            test -f upstream/change-report.json && cat upstream/change-report.json || echo "上游未变化"
+          script: bash scripts/upstream-sync.sh || true
+        - name: 输出变化报告
+          script: node scripts/upstream-summary.mjs --full
 
   # 手动触发：仅前端（Go 侧不变时加速反馈）
   web_trigger_frontend:
